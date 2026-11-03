@@ -23,10 +23,26 @@ const SPOTS: Record<string, string> = {
 };
 
 const KITS: Record<string, string> = {
-  capsuleChest: 'a giant medicine capsule locked around a treasure chest (hiding, protecting, containing, privacy)',
-  parrotCrown: 'a big parrot passing its crown to a baby parrot (inheriting, passing down, parent and child)',
-  morphGem: 'a gem that keeps changing shape (many forms, change, transformation)',
-  buttonTV: 'a TV showing one big ON button with the wires hidden behind it (simple surface, hidden complexity)',
+  capsuleChest: 'a giant capsule locked around a treasure chest (hiding, containing, privacy)',
+  parrotCrown: 'a big parrot passing its crown to a baby parrot (inheriting, passing down)',
+  morphGem: 'a gem that keeps changing shape (many forms, change)',
+  buttonTV: 'a TV with one big ON button, wires hidden behind (simple surface, hidden detail)',
+  rocket: 'a rocket (launch, speed, start, travel)',
+  planet: 'a ringed planet (space, a world, orbit, an atom)',
+  key: 'a key (unlock, access, the answer)',
+  padlock: 'a padlock (security, locked, restriction)',
+  bridge: 'a stone bridge (connection, crossing, link)',
+  coins: 'a stack of coins (money, value, cost, trade)',
+  tree: 'a tree (growth, life, family, hierarchy)',
+  magnet: 'a horseshoe magnet (attraction, force, pull)',
+  book: 'an open book (knowledge, law, record, history)',
+  bulb: 'a light bulb (idea, energy, electricity)',
+  heart: 'a heart (love, life, health, blood)',
+  shield: 'a shield (protection, defence, war)',
+  hourglass: 'an hourglass (time, waiting, age)',
+  scales: 'balance scales (fairness, justice, balance)',
+  ladder: 'a ladder (steps, order, levels, climbing)',
+  mountain: 'a mountain (height, the biggest, obstacle, lasting)',
 };
 
 const COLORS = ['natural', 'red', 'blue', 'green', 'gold', 'purple', 'pink', 'white', 'black'];
@@ -140,12 +156,15 @@ class PalaceBuild {
   cards: Card[] = [];
   done = false;
   trace: TraceStep[] = [];
+  onStep: (step: TraceStep) => void = () => {};
 
   run(name: string, args: Args): Record<string, unknown> {
     const res =
       name === 'plan_palace' ? this.plan(args) : name === 'create_image' ? this.image(args) : name === 'finish_palace' ? this.finish(args) : { ok: false, error: `Unknown tool ${name}` };
     const note = res.ok ? String(res.note ?? '') : String(res.error ?? '');
-    this.trace.push({ tool: name, ok: res.ok === true, note });
+    const step = { tool: name, ok: res.ok === true, note };
+    this.trace.push(step);
+    this.onStep(step);
     return res;
   }
 
@@ -212,8 +231,19 @@ function limited(ip: string): boolean {
   return recent.length > 6;
 }
 
+// Local development (Vite on localhost or the LAN) talks to the deployed agent.
+const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$/;
+let corsOrigin = '';
+const cors = (): Record<string, string> =>
+  corsOrigin ? { 'access-control-allow-origin': corsOrigin, 'access-control-allow-headers': 'content-type, accept', vary: 'origin' } : {};
 const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...cors() } });
+
+export function OPTIONS(request: Request): Response {
+  const origin = request.headers.get('origin') ?? '';
+  corsOrigin = LOCAL_ORIGIN.test(origin) ? origin : '';
+  return new Response(null, { status: 204, headers: { ...cors(), 'access-control-allow-methods': 'POST, GET, OPTIONS' } });
+}
 
 interface Part {
   text?: string;
@@ -272,6 +302,8 @@ async function callModel(model: string, key: string, contents: Content[]): Promi
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const origin = request.headers.get('origin') ?? '';
+  corsOrigin = LOCAL_ORIGIN.test(origin) ? origin : '';
   const key = process.env.GEMINI_API_KEY;
   if (!key) return json({ error: 'Smriti is not configured yet (GEMINI_API_KEY missing).' }, 503);
   const ip = (request.headers.get('x-forwarded-for') ?? 'unknown').split(',')[0].trim();
@@ -288,34 +320,57 @@ export async function POST(request: Request): Promise<Response> {
 
   const build = new PalaceBuild();
   const state = { model: 0 };
-  const contents: Content[] = [
-    { role: 'user', parts: [{ text: `Build a memory palace for this. Learner's material:\n"""\n${topic}\n"""` }] },
-  ];
-  try {
-    for (let turn = 0; turn < MAX_TURNS && !build.done; turn++) {
-      const reply = await callGemini(key, contents, state);
-      contents.push(reply); // keep every part unmodified (thought signatures)
-      const calls = reply.parts.filter((p) => p.functionCall);
-      if (!calls.length) {
-        contents.push({ role: 'user', parts: [{ text: 'Use the tools. Continue.' }] });
-        continue;
+  const run = async (): Promise<Record<string, unknown>> => {
+    const contents: Content[] = [
+      { role: 'user', parts: [{ text: `Build a memory palace for this. Learner's material:\n"""\n${topic}\n"""` }] },
+    ];
+    try {
+      for (let turn = 0; turn < MAX_TURNS && !build.done; turn++) {
+        const reply = await callGemini(key, contents, state);
+        contents.push(reply); // keep every part unmodified (thought signatures)
+        const calls = reply.parts.filter((p) => p.functionCall);
+        if (!calls.length) {
+          contents.push({ role: 'user', parts: [{ text: 'Use the tools. Continue.' }] });
+          continue;
+        }
+        const responses: Part[] = calls.map((p) => {
+          const fc = p.functionCall!;
+          const result = build.run(fc.name, fc.args ?? {});
+          return { functionResponse: { name: fc.name, ...(fc.id ? { id: fc.id } : {}), response: result } };
+        });
+        contents.push({ role: 'user', parts: responses });
       }
-      const responses: Part[] = calls.map((p) => {
-        const fc = p.functionCall!;
-        const result = build.run(fc.name, fc.args ?? {});
-        return { functionResponse: { name: fc.name, ...(fc.id ? { id: fc.id } : {}), response: result } };
-      });
-      contents.push({ role: 'user', parts: responses });
+    } catch (err) {
+      return { type: 'error', status: 502, error: 'Smriti could not reach the model. Try again.', detail: String(err).slice(0, 300) };
     }
-  } catch (err) {
-    return json({ error: 'Smriti could not reach the model. Try again.', detail: String(err).slice(0, 300), trace: build.trace }, 502);
+    if (!build.done) return { type: 'error', status: 422, error: 'Smriti could not finish this palace. Try a shorter topic.' };
+    return {
+      type: 'done',
+      deck: { id: `agent-${slug(build.title)}`, title: build.title, intro: build.intro, cards: build.cards },
+      model: MODELS[state.model],
+    };
+  };
+
+  // Streaming (NDJSON): one line per checked tool call, then the finished deck.
+  if ((request.headers.get('accept') ?? '').includes('application/x-ndjson')) {
+    const enc = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(ctrl) {
+        const send = (o: unknown) => ctrl.enqueue(enc.encode(`${JSON.stringify(o)}\n`));
+        build.onStep = (step) => send({ type: 'step', ...step });
+        const end = await run();
+        send(end);
+        ctrl.close();
+      },
+    });
+    return new Response(stream, {
+      headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store', ...cors() },
+    });
   }
-  if (!build.done) return json({ error: 'Smriti could not finish this palace. Try a shorter topic.', trace: build.trace }, 422);
-  return json({
-    deck: { id: `agent-${slug(build.title)}`, title: build.title, intro: build.intro, cards: build.cards },
-    trace: build.trace,
-    model: MODELS[state.model],
-  });
+
+  const end = await run();
+  if (end.type === 'error') return json({ error: end.error, detail: end.detail, trace: build.trace }, Number(end.status));
+  return json({ deck: end.deck, trace: build.trace, model: end.model });
 }
 
 export function GET(): Response {

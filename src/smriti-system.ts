@@ -23,8 +23,11 @@ import {
 } from '@iwsdk/core';
 import { makeAnswerOrb, ORB_COLORS, type OrbParts } from './answer-orb.js';
 import { chime } from './chime.js';
+import { deckSource } from './deck-source.js';
 import { OOP_DECK, type Deck, type MemoryCard } from './decks.js';
-import { makeDiya, makeMarigold, makeSpotRing, MEMORY_KITS } from './memory-objects.js';
+import { animateKit, styleKit, type Styled } from './kit-style.js';
+import { KITS } from './memory-kits.js';
+import { makeDiya, makeMarigold, makeSpotRing } from './memory-objects.js';
 import { LOCI, type Locus, TRAY } from './palace-layout.js';
 import { AnswerOrb, MemoryItem, MemoryPhase, SpotMarker } from './smriti-components.js';
 
@@ -40,7 +43,7 @@ function placedScale(locusId: string): number {
   return Math.min(2.8, Math.max(1.6, 1.25 + 0.6 * d));
 }
 
-type Mode = 'tutorial' | 'place' | 'ready' | 'recall' | 'done';
+type Mode = 'tutorial' | 'waiting' | 'place' | 'ready' | 'recall' | 'done';
 const TUTORIAL_ID = 'tutorial';
 const WEIRD_SCALE = 1.35;
 const REVEAL_TIME = 0.45;
@@ -84,6 +87,11 @@ export class SmritiSystem extends createSystem({
   // Recall state
   private mode: Mode = 'tutorial';
   private tutorial: Entity | null = null;
+  private styled = new Map<Entity, Styled>();
+  private seenVersion = -1;
+  private seenSteps = 0;
+  /** Memories wait smaller on the tray when the deck is big. */
+  private trayScale = 1;
   private orbs: Orb[] = [];
   private queue: Entity[] = [];
   private current: Entity | null = null;
@@ -164,23 +172,34 @@ export class SmritiSystem extends createSystem({
   }
 
   private spawnDeck(): void {
+    this.deck = deckSource.deck;
     const n = this.deck.cards.length;
+    const perRow = n > 4 ? Math.ceil(n / 2) : n;
+    this.trayScale = n > 4 ? 0.72 : 1;
     this.deck.cards.forEach((card, i) => {
-      const obj = MEMORY_KITS[card.kit]();
+      const kit = KITS[card.kit].make();
+      const st = styleKit(kit, card.color ?? 'natural', card.modifier ?? 'none');
+      const obj = st.root;
       const e = this.world.createTransformEntity(obj);
       e.object3D!.name = `Memory ${card.answer}`;
+      const row = Math.floor(i / perRow);
+      const inRow = row === 0 ? perRow : n - perRow;
+      const col = i - row * perRow;
       const [cx, cy, cz] = TRAY.center;
-      const x = cx + (i - (n - 1) / 2) * TRAY.spacing;
-      const home = new Vector3(x, cy, cz - Math.abs(i - (n - 1) / 2) * 0.03);
+      const off = col - (inRow - 1) / 2;
+      const sp = TRAY.spacing * (n > 4 ? 0.85 : 1);
+      const home = new Vector3(cx + off * sp, cy + row * 0.09, cz - row * 0.16 - Math.abs(off) * 0.03);
       e.object3D!.position.copy(home);
-      e.object3D!.lookAt(this.tmpA.set(0, cy, 0.5));
+      e.object3D!.scale.setScalar(this.trayScale);
+      e.object3D!.lookAt(this.tmpA.set(0, home.y, 0.5));
       e.addComponent(OneHandGrabbable, { rotate: true, translate: true });
       e.addComponent(MemoryItem, { cardId: card.id, locus: '', phase: MemoryPhase.Tray });
       this.home.set(e, home);
       this.cards.set(e, card);
-      const formNames = obj.userData.morphForms as string[] | undefined;
+      this.styled.set(e, st);
+      const formNames = kit.userData.morphForms as string[] | undefined;
       if (formNames) {
-        const forms = formNames.map((nm) => obj.getObjectByName(nm)).filter((f): f is Object3D => !!f);
+        const forms = formNames.map((nm) => kit.getObjectByName(nm)).filter((f): f is Object3D => !!f);
         this.morphs.push({ forms, offset: i * 0.3 });
       }
     });
@@ -199,7 +218,8 @@ export class SmritiSystem extends createSystem({
     }
     this.flights.delete(e);
     this.reveals.delete(e);
-    e.object3D?.scale.set(1, 1, 1);
+    e.object3D?.scale.setScalar(this.trayScale);
+    this.styled.get(e)?.pivot.scale.setScalar(1);
     this.freeLocus(e);
     e.setValue(MemoryItem, 'phase', MemoryPhase.Tray);
     chime('tick');
@@ -263,6 +283,8 @@ export class SmritiSystem extends createSystem({
       return;
     }
     e.setValue(MemoryItem, 'phase', MemoryPhase.Placed);
+    const st = this.styled.get(e);
+    if (st) st.pivot.scale.setScalar(st.sizeScale);
     chime('soft');
     if (e === this.tutorial) {
       this.finishTutorial(e);
@@ -309,21 +331,40 @@ export class SmritiSystem extends createSystem({
   }
 
   private finishTutorial(e: Entity): void {
-    this.mode = 'place';
-    this.say('That is all it takes. Here come your memories: the 4 pillars of OOP.', '');
-    this.later(1.4, () => {
+    this.later(1.2, () => {
       this.freeLocus(e);
       this.home.delete(e);
       this.tutorial = null;
       e.dispose();
-      this.spawnDeck();
-      for (const it of this.queries.items.entities) this.reveal(it);
-      chime('right');
-      this.say(
-        'Each one is a vivid picture of an idea. Put each picture on its own spot.',
-        'Pinch one, move it toward a glowing ring, and let go.',
-      );
+      if (deckSource.status === 'building') {
+        this.mode = 'waiting';
+        this.seenSteps = -1;
+        this.say('That is all it takes. I am still imagining your palace.', this.progressHint());
+      } else {
+        this.say('That is all it takes.', '');
+        this.later(1, () => this.arriveDeck());
+      }
     });
+  }
+
+  private progressHint(): string {
+    const made = deckSource.steps.filter((st) => st.ok && st.tool === 'create_image').length;
+    const last = [...deckSource.steps].reverse().find((st) => st.ok && st.tool === 'create_image');
+    if (!last) return 'Choosing what is worth remembering...';
+    return `Images ready: ${made}. Latest: ${last.note.replace(' -> ', ', ').replace(' on ', ' on the ')}.`;
+  }
+
+  /** Bring in whatever deck the start screen chose (preset or the agent's). */
+  private arriveDeck(): void {
+    this.mode = 'place';
+    const failed = deckSource.status === 'error';
+    this.spawnDeck();
+    for (const it of this.queries.items.entities) this.reveal(it);
+    chime('right');
+    const intro = failed
+      ? `I could not finish your palace (${deckSource.error}), so let us start with ${this.deck.title}.`
+      : this.deck.intro ?? `Here come your memories: ${this.deck.title}.`;
+    this.say(intro, 'Pinch a picture, move it toward a glowing ring, and let go.');
   }
 
   // ---------------------------------------------------------------- recall
@@ -500,6 +541,18 @@ export class SmritiSystem extends createSystem({
       this.nextAction = null;
       fn();
     }
+    if (this.mode === 'waiting' && deckSource.version !== this.seenVersion) {
+      this.seenVersion = deckSource.version;
+      if (deckSource.status === 'building') {
+        if (deckSource.steps.length !== this.seenSteps) {
+          this.seenSteps = deckSource.steps.length;
+          this.setCaption('SMRITI', 'I am imagining your palace...', this.progressHint());
+        }
+      } else {
+        this.arriveDeck();
+      }
+    }
+    for (const st of this.styled.values()) animateKit(st, t, delta);
     // Recall reveals: pop back in with a little overshoot
     for (const [e, rt] of this.reveals) {
       const obj = e.object3D;
@@ -507,7 +560,7 @@ export class SmritiSystem extends createSystem({
       const nt = Math.min(1, rt + delta / REVEAL_TIME);
       this.reveals.set(e, nt);
       const locus = e.getValue(MemoryItem, 'locus') as string;
-      const base = placedScale(locus) * (this.weird.has(e) ? WEIRD_SCALE : 1);
+      const base = (locus ? placedScale(locus) : this.trayScale) * (this.weird.has(e) ? WEIRD_SCALE : 1);
       const k = 1 + Math.sin(nt * Math.PI) * 0.25 * (1 - nt);
       const sc = base * nt * k;
       obj.scale.set(sc, sc, sc);
@@ -540,12 +593,12 @@ export class SmritiSystem extends createSystem({
       const k = f.t * f.t * (3 - 2 * f.t);
       obj.position.lerpVectors(f.from, f.to, k);
       obj.position.y += Math.sin(Math.PI * k) * 0.25;
-      const target = f.locus ? placedScale(f.locus) : e === this.tutorial ? 2.2 : 1;
+      const target = f.locus ? placedScale(f.locus) : e === this.tutorial ? 2.2 : this.trayScale;
       const sc = obj.scale.x + (target - obj.scale.x) * Math.min(1, delta * 6);
       obj.scale.set(sc, sc, sc);
       obj.quaternion.slerp(this.upright, Math.min(1, delta * 8));
       if (f.t >= 1) {
-        const fin = f.locus ? placedScale(f.locus) : e === this.tutorial ? 2.2 : 1;
+        const fin = f.locus ? placedScale(f.locus) : e === this.tutorial ? 2.2 : this.trayScale;
         obj.scale.set(fin, fin, fin);
         this.flights.delete(e);
         this.land(e, f);
