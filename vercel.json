@@ -3,5 +3,5 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": { "api/agent.ts": { "maxDuration": 60 } }
+  "functions": { "api/agent.ts": { "maxDuration": 120 } }
 }
