@@ -1,4 +1,4 @@
 import { defineComponents } from '@iwsdk/core';
-import { MemoryItem, SpotMarker } from './smriti-components.js';
+import { AnswerOrb, MemoryItem, SpotMarker } from './smriti-components.js';
 
-export default defineComponents([MemoryItem, SpotMarker]);
+export default defineComponents([AnswerOrb, MemoryItem, SpotMarker]);

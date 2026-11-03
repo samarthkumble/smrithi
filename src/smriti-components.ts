@@ -14,3 +14,9 @@ export const MemoryItem = createComponent('MemoryItem', {
 export const SpotMarker = createComponent('SpotMarker', {
   locus: { type: Types.String, default: '' },
 });
+
+/** One of the floating answer orbs used in recall (slot 0..2, left to right). */
+export const AnswerOrb = createComponent('AnswerOrb', {
+  slot: { type: Types.Int8, default: 0 },
+  label: { type: Types.String, default: '' },
+});
