@@ -3,6 +3,7 @@
  * Returns a wrapper whose child "Pivot" carries the animated part, so effects never
  * fight the placement transform.
  */
+import { settings } from './settings.js';
 import { Box3, ConeGeometry, Group, Mesh, MeshStandardMaterial, type Object3D, Vector3 } from '@iwsdk/core';
 
 export const KIT_COLORS: Record<string, string> = {
@@ -85,7 +86,10 @@ export function styleKit(kit: Object3D, color: string, modifier: string): Styled
 /** Per-frame effect motion; allocation-free. */
 export function animateKit(s: Styled, t: number, delta: number): void {
   const p = s.pivot;
-  switch (s.modifier) {
+  if (settings.calm) {
+    // Calm motion: effects hold still (floating keeps its lift, flames stay lit).
+    if (s.modifier === 'floating') p.position.y = 0.05;
+  } else switch (s.modifier) {
     case 'spinning':
       p.rotation.y += delta * 2.2;
       break;

@@ -26,6 +26,8 @@ import { chime } from './chime.js';
 import { deckSource } from './deck-source.js';
 import { OOP_DECK, type Deck, type MemoryCard } from './decks.js';
 import { animateKit, styleKit, type Styled } from './kit-style.js';
+import { loadPalace, nextReviewText, recordReview, savePlacement } from './palace-store.js';
+import { settings } from './settings.js';
 import { KITS } from './memory-kits.js';
 import { makeDiya, makeMarigold, makeSpotRing } from './memory-objects.js';
 import { LOCI, type Locus, TRAY } from './palace-layout.js';
@@ -92,6 +94,7 @@ export class SmritiSystem extends createSystem({
   private seenSteps = 0;
   /** Memories wait smaller on the tray when the deck is big. */
   private trayScale = 1;
+  private begun = false;
   private orbs: Orb[] = [];
   private queue: Entity[] = [];
   private current: Entity | null = null;
@@ -111,7 +114,6 @@ export class SmritiSystem extends createSystem({
     this.spawnDiya();
     this.spawnMarkers();
     this.spawnOrbs();
-    this.spawnTutorial();
     this.cleanupFuncs.push(
       // Outside the headset only the room and the start panel show.
       this.world.visibilityState.subscribe((state) => {
@@ -119,6 +121,7 @@ export class SmritiSystem extends createSystem({
         this.diya.visible = inXR;
         for (const e of this.queries.items.entities) if (e.object3D) e.object3D.visible = inXR && !this.hidden.has(e);
         this.markersVisible = inXR;
+        if (inXR && !this.begun) this.begin();
       }),
       this.queries.held.subscribe('qualify', (e) => this.onGrab(e)),
       this.queries.held.subscribe('disqualify', (e) => this.onRelease(e)),
@@ -299,6 +302,7 @@ export class SmritiSystem extends createSystem({
     const spot = LOCI.find((l) => l.id === f.locus);
     if (count >= total) {
       this.mode = 'ready';
+      this.savePalaceNow();
       this.say(
         `All ${total} memories are in your palace. Look around once and say them in your head.`,
         'When you are ready, touch the orb in front of you.',
@@ -307,6 +311,69 @@ export class SmritiSystem extends createSystem({
     } else if (card) {
       this.say(card.story.replace(/^On [^,]+, |^Under [^,]+, /, `At ${spot?.label ?? 'this spot'}, `), `${total - count} left to place.`);
     }
+  }
+
+  // ----------------------------------------------------------------- start
+
+  /** First entry into the headset: review a saved palace, or start a new one. */
+  private begin(): void {
+    this.begun = true;
+    const caption = this.world.getSceneObject('caption-panel');
+    if (caption && settings.largeText) caption.scale.multiplyScalar(1.35);
+    if (deckSource.review) {
+      this.restoreReview();
+      return;
+    }
+    let tutorialDone = false;
+    try {
+      tutorialDone = localStorage.getItem('smriti.tutorialDone') === '1';
+    } catch {
+      /* ignore */
+    }
+    if (!tutorialDone) {
+      this.spawnTutorial();
+    } else if (deckSource.status === 'building') {
+      this.mode = 'waiting';
+      this.seenSteps = -1;
+      this.say('Welcome back. I am imagining your palace.', this.progressHint());
+    } else {
+      this.arriveDeck();
+    }
+  }
+
+  /** Put every saved memory back on its spot, then walk the palace with a test. */
+  private restoreReview(): void {
+    const saved = deckSource.review!;
+    this.spawnDeck();
+    for (const e of this.queries.items.entities) {
+      const card = this.cards.get(e);
+      const locus = card ? LOCI.find((l) => l.id === saved.placed[card.id]) : undefined;
+      if (!card || !locus || this.occupant.has(locus.id)) continue;
+      this.occupant.set(locus.id, e);
+      e.setValue(MemoryItem, 'locus', locus.id);
+      e.setValue(MemoryItem, 'phase', MemoryPhase.Placed);
+      e.object3D!.position.set(...locus.anchor);
+      e.object3D!.quaternion.identity();
+      e.object3D!.scale.setScalar(placedScale(locus.id));
+      const st = this.styled.get(e);
+      if (st) st.pivot.scale.setScalar(st.sizeScale);
+      if (saved.weird.includes(card.id)) this.weird.add(e);
+    }
+    const streak = saved.streak > 0 ? ` Your streak is ${saved.streak} day${saved.streak === 1 ? '' : 's'}.` : '';
+    this.mode = 'ready';
+    this.say(`Welcome back to your palace: ${this.deck.title}.${streak}`, 'Look around once. Then I will hide them and test you.');
+    this.later(6, () => this.startRecall());
+  }
+
+  private savePalaceNow(): void {
+    const placed: Record<string, string> = {};
+    const weird: string[] = [];
+    for (const [e, card] of this.cards) {
+      const locus = e.getValue(MemoryItem, 'locus') as string;
+      if (locus) placed[card.id] = locus;
+      if (this.weird.has(e)) weird.push(card.id);
+    }
+    savePlacement(this.deck, placed, weird);
   }
 
   // -------------------------------------------------------------- tutorial
@@ -331,6 +398,11 @@ export class SmritiSystem extends createSystem({
   }
 
   private finishTutorial(e: Entity): void {
+    try {
+      localStorage.setItem('smriti.tutorialDone', '1');
+    } catch {
+      /* ignore */
+    }
     this.later(1.2, () => {
       this.freeLocus(e);
       this.home.delete(e);
@@ -485,8 +557,13 @@ export class SmritiSystem extends createSystem({
     (this.round === 1 ? this.firstTry : this.secondTry).set(e, ok);
     for (const o of this.orbs) {
       if (!o.shown) continue;
-      if (o.value === card.answer) o.setTint(ORB_COLORS.right);
-      else if (o === orb) o.setTint(ORB_COLORS.wrong);
+      if (o.value === card.answer) {
+        o.setTint(ORB_COLORS.right);
+        o.setLabel(o.value, 'right');
+      } else if (o === orb) {
+        o.setTint(ORB_COLORS.wrong);
+        o.setLabel(o.value, 'wrong');
+      }
       else o.setTint(ORB_COLORS.dim);
     }
     this.askLocus = '';
@@ -522,14 +599,14 @@ export class SmritiSystem extends createSystem({
       this.setHidden(e, false);
       if (!e.hasComponent(OneHandGrabbable)) e.addComponent(OneHandGrabbable, { rotate: true, translate: true });
     }
-    const missedIds = [...this.firstTry].filter(([, ok]) => !ok).map(([e]) => this.cards.get(e)?.id ?? '');
-    saveResult({ deck: this.deck.id, at: Date.now(), first, recovered, total, missed: missedIds });
+    const weirdIds = [...this.weird].map((e) => this.cards.get(e)?.id ?? '').filter(Boolean);
+    if (!loadPalace()) this.savePalaceNow();
+    const saved = recordReview(first, total, weirdIds);
     chime(first === total ? 'right' : 'soft');
     const after = this.secondTry.size > 0 ? ` After the weird remake, ${first + recovered} of ${total}.` : '';
-    this.say(
-      `You remembered ${first} of ${total}.${after} I will check on you tomorrow.`,
-      'Touch the orb to test again, or move a memory to rearrange.',
-    );
+    const streak = saved ? ` Streak: ${saved.streak} day${saved.streak === 1 ? '' : 's'}.` : '';
+    const next = saved ? `${nextReviewText(saved)}. ` : '';
+    this.say(`You remembered ${first} of ${total}.${after}${streak}`, `${next}Touch the orb to test again.`);
     this.showOrbs(['', 'Test again', '']);
   }
 
@@ -573,6 +650,10 @@ export class SmritiSystem extends createSystem({
       if (e.getValue(MemoryItem, 'phase') !== MemoryPhase.Placed) continue;
       const base = placedScale(e.getValue(MemoryItem, 'locus') as string) * WEIRD_SCALE;
       const w = base * (1 + Math.sin(t * 4.2) * 0.06);
+      if (settings.calm) {
+        obj.scale.setScalar(base);
+        continue;
+      }
       obj.scale.set(w, base * (1 + Math.sin(t * 4.2 + 1.6) * 0.06), w);
       obj.rotation.y += delta * 1.4;
     }
@@ -580,7 +661,7 @@ export class SmritiSystem extends createSystem({
     for (const orb of this.orbs) {
       if (!orb.shown) continue;
       const slot = orb.entity.getValue(AnswerOrb, 'slot') as number;
-      orb.ball.position.y = Math.sin(t * 2 + slot) * 0.008;
+      orb.ball.position.y = settings.calm ? 0 : Math.sin(t * 2 + slot) * 0.008;
       const target = orb.entity.hasComponent(Hovered) ? 1.2 : 1;
       const s = orb.ball.scale.x + (target - orb.ball.scale.x) * Math.min(1, delta * 10);
       orb.ball.scale.set(s, s, s);
@@ -636,26 +717,5 @@ function shuffle<T>(arr: T[]): void {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-
-interface RecallResult {
-  deck: string;
-  at: number;
-  first: number;
-  recovered: number;
-  total: number;
-  missed: string[];
-}
-
-/** Keep a small history on this device so tomorrow's review knows what was hard. */
-function saveResult(r: RecallResult): void {
-  try {
-    const key = 'smriti.results';
-    const list = JSON.parse(localStorage.getItem(key) ?? '[]') as RecallResult[];
-    list.push(r);
-    localStorage.setItem(key, JSON.stringify(list.slice(-30)));
-  } catch {
-    /* storage can be unavailable; the session still works */
   }
 }

@@ -25,7 +25,8 @@ export interface OrbParts {
   root: Group;
   ball: Mesh;
   mat: MeshStandardMaterial;
-  setLabel(text: string): void;
+  /** mark draws a tick or cross so right/wrong never depends on colour alone. */
+  setLabel(text: string, mark?: 'right' | 'wrong'): void;
   setTint(c: Color): void;
 }
 
@@ -60,6 +61,7 @@ export function makeAnswerOrb(): OrbParts {
 
   let accent = '#E3A21A';
   let text = '';
+  let mark: 'right' | 'wrong' | undefined;
   const draw = () => {
     ctx.clearRect(0, 0, W, H);
     const r = 46;
@@ -76,10 +78,40 @@ export function makeAnswerOrb(): OrbParts {
       size -= 2;
       ctx.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
     }
+    const shift = mark ? 38 : 0;
+    if (mark) {
+      const cx = 64;
+      const cy = H / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+      ctx.fillStyle = accent;
+      ctx.fill();
+      ctx.strokeStyle = '#1b120b';
+      ctx.lineWidth = 9;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      if (mark === 'right') {
+        ctx.moveTo(cx - 14, cy + 1);
+        ctx.lineTo(cx - 3, cy + 12);
+        ctx.lineTo(cx + 15, cy - 11);
+      } else {
+        ctx.moveTo(cx - 11, cy - 11);
+        ctx.lineTo(cx + 11, cy + 11);
+        ctx.moveTo(cx + 11, cy - 11);
+        ctx.lineTo(cx - 11, cy + 11);
+      }
+      ctx.stroke();
+      size = Math.min(size, 54);
+      ctx.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
+      while (ctx.measureText(text).width > W - 70 - shift * 2 && size > 28) {
+        size -= 2;
+        ctx.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
+      }
+    }
     ctx.fillStyle = '#F7EEDC';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, W / 2, H / 2 + 3);
+    ctx.fillText(text, W / 2 + shift, H / 2 + 3);
     tex.needsUpdate = true;
   };
 
@@ -87,8 +119,9 @@ export function makeAnswerOrb(): OrbParts {
     root,
     ball,
     mat,
-    setLabel(t: string) {
+    setLabel(t: string, m?: 'right' | 'wrong') {
       text = t;
+      mark = m;
       draw();
     },
     setTint(c: Color) {

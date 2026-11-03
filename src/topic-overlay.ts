@@ -2,7 +2,9 @@
  * Start screen (2D only): type what you want to remember, or pick a ready deck,
  * then enter. Typing happens here because the headset keyboard works in 2D pages.
  */
-import { buildFromTopic, deckSource, usePreset } from './deck-source.js';
+import { buildFromTopic, deckSource, startReview, usePreset } from './deck-source.js';
+import { loadPalace, nextReviewText } from './palace-store.js';
+import { saveSettings, settings, type Settings } from './settings.js';
 import { PRESET_DECKS } from './decks.js';
 
 const CSS = `
@@ -19,6 +21,13 @@ const CSS = `
 #smriti-start .chip[aria-pressed=true]{background:#E3A21A;color:#24160c;border-color:#E3A21A}
 #smriti-start .go{margin-left:auto;border:0;border-radius:12px;background:#E3A21A;color:#24160c;font-weight:700;padding:10px 16px;font:inherit;cursor:pointer}
 #smriti-start .go:disabled{opacity:.5;cursor:default}
+#smriti-start .back{display:flex;gap:12px;align-items:center;margin:0 0 14px;padding:12px 14px;border-radius:14px;background:#3a2616;border:1px solid #8a5f33}
+#smriti-start .back b{color:#F3C35B}
+#smriti-start .back small{display:block;color:#CDBB9E}
+#smriti-start .back button{margin-left:auto;flex:none}
+#smriti-start .prefs{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:13px;color:#CDBB9E}
+#smriti-start .prefs label{display:flex;gap:6px;align-items:center;cursor:pointer}
+#smriti-start .prefs input{accent-color:#E3A21A;width:16px;height:16px}
 #smriti-start .status{margin-top:8px;min-height:20px;color:#CDBB9E;font-size:13px}
 `;
 
@@ -38,10 +47,37 @@ export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: () => vo
     <div class="row" role="group" aria-label="Ready decks">
       <span style="color:#CDBB9E;font-size:13px">Or try:</span>
     </div>
-    <div class="row"><span class="status" aria-live="polite"></span><button class="go" type="button">Build my palace</button></div>`;
+    <div class="row"><span class="status" aria-live="polite"></span><button class="go main" type="button">Build my palace</button></div>
+    <div class="prefs" role="group" aria-label="Comfort">
+      <label><input type="checkbox" data-pref="largeText">Larger captions</label>
+      <label><input type="checkbox" data-pref="calm">Calm motion</label>
+      <label><input type="checkbox" data-pref="sound">Sounds</label>
+    </div>`;
+  for (const box of root.querySelectorAll<HTMLInputElement>('input[data-pref]')) {
+    const key = box.dataset.pref as keyof Settings;
+    box.checked = settings[key];
+    box.addEventListener('change', () => {
+      settings[key] = box.checked;
+      saveSettings();
+    });
+  }
+  const saved = loadPalace();
+  if (saved) {
+    const back = document.createElement('div');
+    back.className = 'back';
+    const streak = saved.streak > 0 ? ` · ${saved.streak}-day streak` : '';
+    back.innerHTML = `<div><b>Welcome back.</b> Your palace is waiting.<small></small></div><button class="go" type="button">Review my palace</button>`;
+    back.querySelector('small')!.textContent = `${saved.deck.title} · ${nextReviewText(saved)}${streak}`;
+    back.querySelector('button')!.addEventListener('click', () => {
+      startReview(saved);
+      if (opts.canEnterXR) opts.enterXR();
+      else status.textContent = 'Open this page on a Meta Quest to step inside.';
+    });
+    root.insertBefore(back, root.querySelector('h2'));
+  }
   const text = root.querySelector('textarea')!;
   const chipsRow = root.querySelectorAll('.row')[0] as HTMLElement;
-  const go = root.querySelector('.go') as HTMLButtonElement;
+  const go = root.querySelector('.go.main') as HTMLButtonElement;
   const status = root.querySelector('.status') as HTMLElement;
   let preset = PRESET_DECKS[0];
   const chips = PRESET_DECKS.map((d) => {

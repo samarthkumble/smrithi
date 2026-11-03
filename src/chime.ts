@@ -1,7 +1,10 @@
 /** Tiny synthesized chimes (no audio files): bright rising notes or a soft low pair. */
+import { settings } from './settings.js';
+
 let ctx: AudioContext | null = null;
 
 export function chime(kind: 'right' | 'wrong' | 'soft' | 'tick'): void {
+  if (!settings.sound) return;
   try {
     ctx ??= new AudioContext();
     if (ctx.state === 'suspended') void ctx.resume();

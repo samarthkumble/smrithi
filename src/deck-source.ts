@@ -6,6 +6,7 @@ import { type Deck, type MemoryCard, OOP_DECK } from './decks.js';
 import { isKit } from './memory-kits.js';
 import { isModifier, KIT_COLORS } from './kit-style.js';
 import { LOCI, type LocusId } from './palace-layout.js';
+import type { SavedPalace } from './palace-store.js';
 
 export type DeckStatus = 'ready' | 'building' | 'error';
 
@@ -21,6 +22,8 @@ export const deckSource = {
   topic: '',
   steps: [] as AgentStep[],
   error: '',
+  /** Set when the person came back to review a saved palace. */
+  review: null as SavedPalace | null,
   /** Bumped on every change so systems can react without polling objects. */
   version: 0,
 };
@@ -28,7 +31,12 @@ export const deckSource = {
 const bump = () => (deckSource.version += 1);
 
 export function usePreset(deck: Deck): void {
-  Object.assign(deckSource, { status: 'ready', deck, topic: '', steps: [], error: '' });
+  Object.assign(deckSource, { status: 'ready', deck, topic: '', steps: [], error: '', review: null });
+  bump();
+}
+
+export function startReview(p: SavedPalace): void {
+  Object.assign(deckSource, { status: 'ready', deck: p.deck, topic: '', steps: [], error: '', review: p });
   bump();
 }
 
@@ -77,7 +85,7 @@ function agentUrl(): string {
 
 /** Ask Smriti's agent to build a palace; progress streams into deckSource.steps. */
 export async function buildFromTopic(topic: string): Promise<void> {
-  Object.assign(deckSource, { status: 'building', topic, steps: [], error: '' });
+  Object.assign(deckSource, { status: 'building', topic, steps: [], error: '', review: null });
   bump();
   const fail = (msg: string) => {
     Object.assign(deckSource, { status: 'error', error: msg, deck: OOP_DECK });
