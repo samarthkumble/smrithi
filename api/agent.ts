@@ -32,7 +32,12 @@ const KITS: Record<string, string> = {
 const COLORS = ['natural', 'red', 'blue', 'green', 'gold', 'purple', 'pink', 'white', 'black'];
 const MODIFIERS = ['none', 'giant', 'tiny', 'glowing', 'spinning', 'bouncing', 'on_fire', 'floating'];
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+// Tried in order; a busy or failing model falls through to the next one.
+const MODELS = [process.env.GEMINI_MODEL || 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'].filter(
+  (m, i, all) => all.indexOf(m) === i,
+);
+const MODEL = MODELS[0];
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 const MAX_TURNS = 12;
 const MAX_INPUT = 1500;
 
@@ -220,8 +225,31 @@ interface Content {
   parts: Part[];
 }
 
-async function callGemini(key: string, contents: Content[]): Promise<Content> {
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Call the current model; on overload, retry once, then move to the next model and stay there. */
+async function callGemini(key: string, contents: Content[], state: { model: number }): Promise<Content> {
+  let lastError: unknown;
+  for (; state.model < MODELS.length; state.model++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await callModel(MODELS[state.model], key, contents);
+      } catch (err) {
+        lastError = err;
+        const status = (err as { status?: number }).status ?? ((err as Error).name === 'AbortError' ? 504 : 0);
+        if (!RETRYABLE.has(status)) throw err;
+        if (attempt === 0) await sleep(700);
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function callModel(model: string, key: string, contents: Content[]): Promise<Content> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    signal: ctrl.signal,
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({
@@ -232,9 +260,10 @@ async function callGemini(key: string, contents: Content[]): Promise<Content> {
       generationConfig: { temperature: 1, thinkingConfig: { thinkingLevel: 'low' } },
     }),
   });
+  clearTimeout(timer);
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 300);
-    throw new Error(`Gemini ${res.status}: ${detail}`);
+    throw Object.assign(new Error(`Gemini ${model} ${res.status}: ${detail}`), { status: res.status });
   }
   const data = (await res.json()) as { candidates?: { content?: Content }[] };
   const content = data.candidates?.[0]?.content;
@@ -258,12 +287,13 @@ export async function POST(request: Request): Promise<Response> {
   if (topic.length < 3) return json({ error: 'Tell Smriti what you want to remember.' }, 400);
 
   const build = new PalaceBuild();
+  const state = { model: 0 };
   const contents: Content[] = [
     { role: 'user', parts: [{ text: `Build a memory palace for this. Learner's material:\n"""\n${topic}\n"""` }] },
   ];
   try {
     for (let turn = 0; turn < MAX_TURNS && !build.done; turn++) {
-      const reply = await callGemini(key, contents);
+      const reply = await callGemini(key, contents, state);
       contents.push(reply); // keep every part unmodified (thought signatures)
       const calls = reply.parts.filter((p) => p.functionCall);
       if (!calls.length) {
@@ -284,7 +314,7 @@ export async function POST(request: Request): Promise<Response> {
   return json({
     deck: { id: `agent-${slug(build.title)}`, title: build.title, intro: build.intro, cards: build.cards },
     trace: build.trace,
-    model: MODEL,
+    model: MODELS[state.model],
   });
 }
 
