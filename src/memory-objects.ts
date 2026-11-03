@@ -176,6 +176,61 @@ export function makeDiya(): Group {
 }
 
 /** Glowing ring that marks an empty memory spot while you place things. */
+/**
+ * Onboarding marigold (about 9 cm tall, origin at the stem base, faces +Y).
+ * A ruffled pom-pom: three rings of cupped petals around a dome, green sepals, short stem.
+ */
+export function makeMarigold(): Group {
+  const root = new Group();
+  root.name = 'Marigold';
+  const petalA = std('#F59A1B', 0.55, '#E8740E', 0.25);
+  const petalB = std('#FFB52E', 0.55, '#F08F12', 0.25);
+  const stem = m(new CylinderGeometry(0.0035, 0.0045, 0.045, 8), C.greenDark, 'Stem');
+  stem.position.y = 0.0225;
+  root.add(stem);
+  const head = new Group();
+  head.name = 'Head';
+  head.position.y = 0.05;
+  root.add(head);
+  const sepals = new Group();
+  sepals.name = 'Sepals';
+  const sepalGeo = new ConeGeometry(0.007, 0.018, 4);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const s = m(sepalGeo, C.green, `Sepal${i}`);
+    s.position.set(Math.cos(a) * 0.012, -0.004, Math.sin(a) * 0.012);
+    s.rotation.set(Math.sin(a) * 1.1, 0, -Math.cos(a) * 1.1);
+    sepals.add(s);
+  }
+  head.add(sepals);
+  const dome = m(new SphereGeometry(0.021, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), petalA, 'Dome');
+  head.add(dome);
+  const petals = new Group();
+  petals.name = 'Petals';
+  const petalGeo = new SphereGeometry(0.011, 8, 6);
+  const rings = [
+    { n: 14, r: 0.024, y: 0.002, tilt: 0.55, mat: petalA },
+    { n: 13, r: 0.021, y: 0.013, tilt: 0.95, mat: petalB },
+    { n: 11, r: 0.016, y: 0.023, tilt: 1.25, mat: petalA },
+    { n: 7, r: 0.008, y: 0.031, tilt: 1.45, mat: petalB },
+  ];
+  rings.forEach((ring, ri) => {
+    for (let i = 0; i < ring.n; i++) {
+      const a = (i / ring.n) * Math.PI * 2 + ri * 0.4;
+      const holder = new Group();
+      holder.rotation.y = -a;
+      const p = m(petalGeo, ring.mat, `Petal${ri}_${i}`);
+      p.scale.set(1.25, 0.32, 0.8);
+      p.position.set(ring.r, ring.y, 0);
+      p.rotation.z = ring.tilt;
+      holder.add(p);
+      petals.add(holder);
+    }
+  });
+  head.add(petals);
+  return root;
+}
+
 export function makeSpotRing(): Mesh {
   const ring = m(new TorusGeometry(0.11, 0.008, 6, 32), C.marigold, 'SpotRing');
   ring.rotation.x = Math.PI / 2;

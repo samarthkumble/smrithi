@@ -24,7 +24,7 @@ import {
 import { makeAnswerOrb, ORB_COLORS, type OrbParts } from './answer-orb.js';
 import { chime } from './chime.js';
 import { OOP_DECK, type Deck, type MemoryCard } from './decks.js';
-import { makeDiya, makeSpotRing, MEMORY_KITS } from './memory-objects.js';
+import { makeDiya, makeMarigold, makeSpotRing, MEMORY_KITS } from './memory-objects.js';
 import { LOCI, type Locus, TRAY } from './palace-layout.js';
 import { AnswerOrb, MemoryItem, MemoryPhase, SpotMarker } from './smriti-components.js';
 
@@ -40,7 +40,8 @@ function placedScale(locusId: string): number {
   return Math.min(2.8, Math.max(1.6, 1.25 + 0.6 * d));
 }
 
-type Mode = 'place' | 'ready' | 'recall' | 'done';
+type Mode = 'tutorial' | 'place' | 'ready' | 'recall' | 'done';
+const TUTORIAL_ID = 'tutorial';
 const WEIRD_SCALE = 1.35;
 const REVEAL_TIME = 0.45;
 
@@ -81,7 +82,8 @@ export class SmritiSystem extends createSystem({
   private elapsed = 0;
   private setCaption: (who: string, line: string, hint: string) => void = () => {};
   // Recall state
-  private mode: Mode = 'place';
+  private mode: Mode = 'tutorial';
+  private tutorial: Entity | null = null;
   private orbs: Orb[] = [];
   private queue: Entity[] = [];
   private current: Entity | null = null;
@@ -100,12 +102,8 @@ export class SmritiSystem extends createSystem({
     this.setupCaption();
     this.spawnDiya();
     this.spawnMarkers();
-    this.spawnDeck();
     this.spawnOrbs();
-    this.say(
-      'Welcome. These four memories are the 4 pillars of OOP.',
-      'Pinch one, move it toward a glowing spot, and let go.',
-    );
+    this.spawnTutorial();
     this.cleanupFuncs.push(
       // Outside the headset only the room and the start panel show.
       this.world.visibilityState.subscribe((state) => {
@@ -200,9 +198,16 @@ export class SmritiSystem extends createSystem({
       this.hideOrbs();
     }
     this.flights.delete(e);
+    this.reveals.delete(e);
     e.object3D?.scale.set(1, 1, 1);
     this.freeLocus(e);
     e.setValue(MemoryItem, 'phase', MemoryPhase.Tray);
+    chime('tick');
+    if (e === this.tutorial) {
+      e.object3D?.scale.set(2.2, 2.2, 2.2);
+      this.say('Good, you are holding it.', 'Now move it toward any glowing ring and let go.');
+      return;
+    }
     const card = this.cards.get(e);
     if (card) {
       const spot = LOCI.find((l) => l.id === card.suggested);
@@ -258,9 +263,16 @@ export class SmritiSystem extends createSystem({
       return;
     }
     e.setValue(MemoryItem, 'phase', MemoryPhase.Placed);
+    chime('soft');
+    if (e === this.tutorial) {
+      this.finishTutorial(e);
+      return;
+    }
     const placed = this.queries.items.entities;
     let count = 0;
-    for (const it of placed) if (it.getValue(MemoryItem, 'phase') === MemoryPhase.Placed) count++;
+    for (const it of placed) {
+      if (it !== this.tutorial && it.getValue(MemoryItem, 'phase') === MemoryPhase.Placed) count++;
+    }
     const total = this.deck.cards.length;
     const spot = LOCI.find((l) => l.id === f.locus);
     if (count >= total) {
@@ -273,6 +285,45 @@ export class SmritiSystem extends createSystem({
     } else if (card) {
       this.say(card.story.replace(/^On [^,]+, |^Under [^,]+, /, `At ${spot?.label ?? 'this spot'}, `), `${total - count} left to place.`);
     }
+  }
+
+  // -------------------------------------------------------------- tutorial
+
+  /** First pinch: one marigold, one instruction, before any real content arrives. */
+  private spawnTutorial(): void {
+    const obj = makeMarigold();
+    const e = this.world.createTransformEntity(obj);
+    e.object3D!.name = 'Tutorial Marigold';
+    const [cx, cy, cz] = TRAY.center;
+    const home = new Vector3(cx, cy + 0.04, cz + 0.02);
+    e.object3D!.position.copy(home);
+    e.object3D!.scale.setScalar(2.2);
+    e.addComponent(OneHandGrabbable, { rotate: true, translate: true });
+    e.addComponent(MemoryItem, { cardId: TUTORIAL_ID, locus: '', phase: MemoryPhase.Tray });
+    this.home.set(e, home);
+    this.tutorial = e;
+    this.say(
+      'Hi, I am Smriti, the little lamp. This room will hold what you learn.',
+      'First, pinch the marigold in front of you with your thumb and finger.',
+    );
+  }
+
+  private finishTutorial(e: Entity): void {
+    this.mode = 'place';
+    this.say('That is all it takes. Here come your memories: the 4 pillars of OOP.', '');
+    this.later(1.4, () => {
+      this.freeLocus(e);
+      this.home.delete(e);
+      this.tutorial = null;
+      e.dispose();
+      this.spawnDeck();
+      for (const it of this.queries.items.entities) this.reveal(it);
+      chime('right');
+      this.say(
+        'Each one is a vivid picture of an idea. Put each picture on its own spot.',
+        'Pinch one, move it toward a glowing ring, and let go.',
+      );
+    });
   }
 
   // ---------------------------------------------------------------- recall
@@ -489,12 +540,12 @@ export class SmritiSystem extends createSystem({
       const k = f.t * f.t * (3 - 2 * f.t);
       obj.position.lerpVectors(f.from, f.to, k);
       obj.position.y += Math.sin(Math.PI * k) * 0.25;
-      const target = f.locus ? placedScale(f.locus) : 1;
+      const target = f.locus ? placedScale(f.locus) : e === this.tutorial ? 2.2 : 1;
       const sc = obj.scale.x + (target - obj.scale.x) * Math.min(1, delta * 6);
       obj.scale.set(sc, sc, sc);
       obj.quaternion.slerp(this.upright, Math.min(1, delta * 8));
       if (f.t >= 1) {
-        const fin = f.locus ? placedScale(f.locus) : 1;
+        const fin = f.locus ? placedScale(f.locus) : e === this.tutorial ? 2.2 : 1;
         obj.scale.set(fin, fin, fin);
         this.flights.delete(e);
         this.land(e, f);
