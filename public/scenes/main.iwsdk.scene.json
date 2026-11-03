@@ -1,0 +1,186 @@
+{
+  "version": "iwsdk.scene.v1",
+  "units": "meters",
+  "components": {
+    "com.iwsdk.components.DomeGradient": {
+      "sky": [
+        0.96,
+        0.78,
+        0.55,
+        1
+      ],
+      "equator": [
+        0.93,
+        0.82,
+        0.68,
+        1
+      ],
+      "ground": [
+        0.45,
+        0.25,
+        0.18,
+        1
+      ],
+      "elevationDeg": 10,
+      "azimuthDeg": 0,
+      "dither": true
+    },
+    "com.iwsdk.components.IBLGradient": {
+      "sky": [
+        1.0,
+        0.86,
+        0.66,
+        1
+      ],
+      "equator": [
+        0.95,
+        0.8,
+        0.66,
+        1
+      ],
+      "ground": [
+        0.55,
+        0.3,
+        0.2,
+        1
+      ],
+      "intensity": 0.35
+    }
+  },
+  "environment": {
+    "toneMapping": "aces",
+    "exposure": 1.15,
+    "shadows": false
+  },
+  "resources": {},
+  "nodes": [
+    {
+      "id": "palace-room",
+      "name": "Palace Room",
+      "framingRole": "support",
+      "content": {
+        "type": "asset",
+        "asset": "palace-room"
+      }
+    },
+    {
+      "id": "start-panel",
+      "name": "Start Panel",
+      "content": {
+        "type": "asset",
+        "asset": "start-panel"
+      },
+      "transform": {
+        "position": [
+          0,
+          1.24,
+          -1.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 0.2
+      },
+      "components": {
+        "RayInteractable": {}
+      }
+    },
+    {
+      "id": "caption-panel",
+      "name": "Caption Panel",
+      "content": {
+        "type": "asset",
+        "asset": "caption-panel"
+      },
+      "transform": {
+        "position": [
+          0.52,
+          1.36,
+          -0.98
+        ],
+        "rotationDeg": [
+          -6,
+          -28,
+          0
+        ],
+        "scale": 0.16
+      }
+    },
+    {
+      "id": "warm-fill",
+      "name": "Warm Fill",
+      "components": {
+        "HemisphereLight": {
+          "skyColor": [
+            1.0,
+            0.9,
+            0.76,
+            1
+          ],
+          "groundColor": [
+            0.55,
+            0.32,
+            0.22,
+            1
+          ],
+          "intensity": 1.5
+        }
+      }
+    },
+    {
+      "id": "window-light",
+      "name": "Window Light",
+      "transform": {
+        "position": [
+          -0.4,
+          3.2,
+          -4.0
+        ],
+        "rotationDeg": [
+          -40,
+          170,
+          0
+        ]
+      },
+      "components": {
+        "DirectionalLight": {
+          "color": [
+            1.0,
+            0.78,
+            0.5,
+            1
+          ],
+          "intensity": 1.6,
+          "castShadow": false
+        }
+      }
+    },
+    {
+      "id": "lamp-glow",
+      "name": "Lamp Glow",
+      "transform": {
+        "position": [
+          1.15,
+          1.25,
+          -1.45
+        ]
+      },
+      "components": {
+        "PointLight": {
+          "color": [
+            1.0,
+            0.72,
+            0.38,
+            1
+          ],
+          "intensity": 1.8,
+          "distance": 4,
+          "decay": 2,
+          "castShadow": false
+        }
+      }
+    }
+  ]
+}

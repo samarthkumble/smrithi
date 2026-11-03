@@ -1,0 +1,31 @@
+<style>
+  .panel-root { flex-direction: column; width: 420px; }
+  .panel-content { flex-direction: column; gap: 8px; padding: 24px; }
+  .eyebrow { color: #8A5A00; font-size: 14px; font-weight: 700; letter-spacing: 1.4px; }
+  .eyebrow:dark { color: #E3A21A; }
+  .heading { color: #1c1d20; font-size: 34px; font-weight: 700; line-height: 40px; }
+  .heading:dark { color: #fafaf7; }
+  .body { color: #3a3b40; font-size: 20px; line-height: 27px; }
+  .body:dark { color: #dddfe3; }
+  .button { justify-content: flex-start; margin-left: 24px; margin-right: 24px; margin-bottom: 24px; }
+  .button-label { transform-translate-y: 1px; }
+</style>
+<Panel class="panel-root">
+  <div class="panel-content">
+    <div class="eyebrow">SMRITI</div>
+    <div class="heading">A memory palace that builds itself</div>
+    <div class="body">Sit comfortably. Use your hands to place each memory around the room, and remember it tomorrow.</div>
+  </div>
+  <Button id="xr-button" class="button">
+    <ButtonIcon>
+      <RectangleGoggles></RectangleGoggles>
+    </ButtonIcon>
+    <ButtonLabel class="button-label">Enter Smriti</ButtonLabel>
+  </Button>
+  <Button id="exit-button" class="button" style="display: none">
+    <ButtonIcon>
+      <LogIn></LogIn>
+    </ButtonIcon>
+    <ButtonLabel class="button-label">Exit to Browser</ButtonLabel>
+  </Button>
+</Panel>

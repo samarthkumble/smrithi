@@ -1,0 +1,17 @@
+<style>
+  .cap-root { flex-direction: column; width: 520px; }
+  .cap-content { flex-direction: column; gap: 6px; padding-left: 26px; padding-right: 26px; padding-top: 18px; padding-bottom: 20px; }
+  .who { color: #8A5A00; font-size: 15px; font-weight: 700; letter-spacing: 1.2px; }
+  .who:dark { color: #E3A21A; }
+  .line { color: #1c1d20; font-size: 27px; line-height: 35px; }
+  .line:dark { color: #F3F1EA; }
+  .hint { color: #5a5c63; font-size: 20px; line-height: 26px; }
+  .hint:dark { color: #B9BDC7; }
+</style>
+<Panel class="cap-root">
+  <div class="cap-content">
+    <div id="CaptionWho" class="who">SMRITI</div>
+    <div id="CaptionLine" class="line">Welcome. Let's build a place for your memories.</div>
+    <div id="CaptionHint" class="hint">Pinch an object in front of you.</div>
+  </div>
+</Panel>
