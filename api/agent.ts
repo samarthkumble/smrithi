@@ -223,12 +223,13 @@ class PalaceBuild {
 
 // Best-effort limit per warm instance: 6 builds per IP per 10 minutes.
 const hits = new Map<string, number[]>();
-function limited(ip: string): boolean {
+function limited(ip: string, bucket = 'build', max = 6): boolean {
   const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < 600_000);
+  const k = `${bucket}:${ip}`;
+  const recent = (hits.get(k) ?? []).filter((t) => now - t < 600_000);
   recent.push(now);
-  hits.set(ip, recent);
-  return recent.length > 6;
+  hits.set(k, recent);
+  return recent.length > max;
 }
 
 // Local development (Vite on localhost or the LAN) talks to the deployed agent.
@@ -258,12 +259,19 @@ interface Content {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Call the current model; on overload, retry once, then move to the next model and stay there. */
-async function callGemini(key: string, contents: Content[], state: { model: number }): Promise<Content> {
+interface CallSetup {
+  system: string;
+  tools: unknown[];
+  timeoutMs?: number;
+}
+const BUILD: CallSetup = { system: SYSTEM, tools: TOOLS };
+
+async function callGemini(key: string, contents: Content[], state: { model: number }, setup: CallSetup = BUILD): Promise<Content> {
   let lastError: unknown;
   for (; state.model < MODELS.length; state.model++) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        return await callModel(MODELS[state.model], key, contents);
+        return await callModel(MODELS[state.model], key, contents, setup);
       } catch (err) {
         lastError = err;
         const status = (err as { status?: number }).status ?? ((err as Error).name === 'AbortError' ? 504 : 0);
@@ -275,17 +283,17 @@ async function callGemini(key: string, contents: Content[], state: { model: numb
   throw lastError;
 }
 
-async function callModel(model: string, key: string, contents: Content[]): Promise<Content> {
+async function callModel(model: string, key: string, contents: Content[], setup: CallSetup): Promise<Content> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  const timer = setTimeout(() => ctrl.abort(), setup.timeoutMs ?? 20_000);
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     signal: ctrl.signal,
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM }] },
+      systemInstruction: { parts: [{ text: setup.system }] },
       contents,
-      tools: TOOLS,
+      tools: setup.tools,
       toolConfig: { functionCallingConfig: { mode: 'ANY' } },
       generationConfig: { temperature: 1, thinkingConfig: { thinkingLevel: 'low' } },
     }),
@@ -307,15 +315,18 @@ export async function POST(request: Request): Promise<Response> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return json({ error: 'Smriti is not configured yet (GEMINI_API_KEY missing).' }, 503);
   const ip = (request.headers.get('x-forwarded-for') ?? 'unknown').split(',')[0].trim();
-  if (limited(ip)) return json({ error: 'Too many palaces at once. Try again in a few minutes.' }, 429);
-
-  let topic = '';
+  let body: Record<string, unknown>;
   try {
-    const body = (await request.json()) as { topic?: unknown };
-    topic = str(body.topic, MAX_INPUT);
+    body = (await request.json()) as Record<string, unknown>;
   } catch {
     return json({ error: 'Send JSON like {"topic": "..."}' }, 400);
   }
+  if (body.mode === 'reimagine') {
+    if (limited(ip, 'reimagine', 40)) return json({ error: 'Too many requests. Try again in a few minutes.' }, 429);
+    return reimagine(key, body);
+  }
+  if (limited(ip)) return json({ error: 'Too many palaces at once. Try again in a few minutes.' }, 429);
+  const topic = str(body.topic, MAX_INPUT);
   if (topic.length < 3) return json({ error: 'Tell Smriti what you want to remember.' }, 400);
 
   const build = new PalaceBuild();
@@ -375,4 +386,94 @@ export async function POST(request: Request): Promise<Response> {
 
 export function GET(): Response {
   return json({ ok: true, configured: Boolean(process.env.GEMINI_API_KEY), model: MODEL });
+}
+
+// ------------------------------------------------------------------ reimagine
+
+const REIMAGINE_SYSTEM = `You are Smriti, a memory coach in a VR memory palace. The learner just missed one memory in a test:
+they were shown the spot where they left the image for one answer, and picked a different answer instead.
+Redesign that one image so the right answer becomes impossible to confuse with the one they picked.
+Call reimagine_image exactly once. Rules: choose a kit different from the old image's kit and from the kit of the answer they picked;
+pick a colour and a modifier that make it stranger; weird is one or two short sentences (at most 170 characters) that mention
+both answers by name, explain the difference through the picture, and end with the right answer.
+Kits: ${Object.entries(KITS).map(([id, d]) => `${id} = ${d}`).join('; ')}.`;
+
+const REIMAGINE_TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: 'reimagine_image',
+        description: 'Replace the missed memory image with a new, stranger one that separates it from the confused answer.',
+        parameters: {
+          type: 'object',
+          properties: {
+            kit: { type: 'string', enum: Object.keys(KITS) },
+            color: { type: 'string', enum: COLORS },
+            modifier: { type: 'string', enum: MODIFIERS },
+            weird: { type: 'string' },
+          },
+          required: ['kit', 'color', 'modifier', 'weird'],
+        },
+      },
+    ],
+  },
+];
+
+/** One missed memory: the agent sees what it was confused with and designs a new picture; the server checks it. */
+async function reimagine(key: string, body: Record<string, unknown>): Promise<Response> {
+  const card = (body.card ?? {}) as Record<string, unknown>;
+  const answer = str(card.answer, 40);
+  const oldKit = str(card.kit, 30);
+  const story = str(card.story, 220);
+  const confused = str(body.confused, 40);
+  const confusedKit = str(body.confusedKit, 30);
+  if (!answer || !confused) return json({ error: 'Need card.answer and confused.' }, 400);
+  const trace: TraceStep[] = [];
+  const contents: Content[] = [
+    {
+      role: 'user',
+      parts: [
+        {
+          text: `Missed answer: "${answer}". Old image: kit ${oldKit || 'unknown'}, story: "${story}". They picked "${confused}" instead (its image uses kit ${confusedKit || 'unknown'}).`,
+        },
+      ],
+    },
+  ];
+  const state = { model: 0 };
+  const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, timeoutMs: 9000 };
+  try {
+    for (let turn = 0; turn < 3; turn++) {
+      const reply = await callGemini(key, contents, state, setup);
+      contents.push(reply);
+      const call = reply.parts.find((p) => p.functionCall)?.functionCall;
+      if (!call) {
+        contents.push({ role: 'user', parts: [{ text: 'Call reimagine_image.' }] });
+        continue;
+      }
+      const a = call.args ?? {};
+      const kit = str(a.kit, 30);
+      const weird = str(a.weird, 220);
+      let error = '';
+      if (!KITS[kit]) error = `Unknown kit "${kit}".`;
+      else if (kit === oldKit) error = `The old image already uses ${kit}; choose a different kit.`;
+      else if (kit === confusedKit) error = `${kit} is the image of "${confused}", the answer they confused it with; choose another kit.`;
+      else if (!weird.toLowerCase().includes(answer.toLowerCase())) error = `weird must mention "${answer}".`;
+      else if (weird.length > 200) error = 'weird is too long; keep it under 170 characters.';
+      trace.push({ tool: 'reimagine_image', ok: !error, note: error || `${answer} -> ${kit}` });
+      if (!error) {
+        return json({
+          kit,
+          color: COLORS.includes(String(a.color)) ? String(a.color) : 'natural',
+          modifier: MODIFIERS.includes(String(a.modifier)) ? String(a.modifier) : 'none',
+          weird,
+          trace,
+          model: MODELS[state.model],
+        });
+      }
+      contents.push({ role: 'user', parts: [{ functionResponse: { name: call.name, ...(call.id ? { id: call.id } : {}), response: { ok: false, error } } }] });
+    }
+  } catch (err) {
+    return json({ error: 'Smriti could not reach the model.', detail: String(err).slice(0, 200), trace }, 502);
+  }
+  return json({ error: 'Smriti could not reimagine this one.', trace }, 422);
 }

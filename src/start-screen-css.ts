@@ -61,6 +61,12 @@ export const START_CSS = `
 #smriti-start .back .txt{flex:1;min-width:0}
 #smriti-start .back .txt b{display:block;font-weight:700;color:var(--lime)}
 #smriti-start .back .txt span{font-size:13px;color:var(--lime-dim)}
+#smriti-start .back-actions{display:flex;flex-wrap:wrap;gap:6px 16px;margin:-8px 0 0 4px;font-size:13px}
+#smriti-start .back-actions a,#smriti-start .back-actions button{border:0;background:none;padding:2px 0;color:var(--brass-hi);font:600 13px/1.4 var(--sans);text-decoration:underline;text-underline-offset:3px;cursor:pointer;border-radius:4px}
+#smriti-start .back-actions a:focus-visible{outline:3px solid var(--brass-hi);outline-offset:3px}
+#smriti-start .gift{background:linear-gradient(120deg,rgba(95,143,78,.5),rgba(43,29,21,.92));border-color:rgba(141,187,118,.45)}
+#smriti-start .share-now{align-self:flex-start;margin-top:-10px;padding:8px 14px;font-size:14px}
+#smriti-start .share-now[hidden]{display:none}
 #smriti-start .how{position:absolute;right:clamp(16px,4vw,48px);bottom:28px;margin:0;padding:0;list-style:none;display:flex;gap:10px;pointer-events:auto}
 #smriti-start .how li{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:14px;background:rgba(24,15,10,.72);border:1px solid var(--teak-edge);font-size:13px;color:var(--lime-dim);max-width:200px}
 #smriti-start .how li i{font:400 22px/1 var(--serif);font-style:normal;color:var(--brass-hi)}

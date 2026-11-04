@@ -134,3 +134,46 @@ export async function buildFromTopic(topic: string): Promise<void> {
     fail('Smriti could not reach the internet.');
   }
 }
+
+export interface Reimagined {
+  kit: string;
+  color: string;
+  modifier: string;
+  weird: string;
+}
+
+/**
+ * After a miss: ask the agent for a new picture that separates this answer from the
+ * one the person picked. Resolves to null (never rejects) if the agent is slow or fails,
+ * so the session can carry on with the card's own weird line.
+ */
+export async function reimagineCard(card: MemoryCard, confused: MemoryCard | undefined, confusedAnswer: string): Promise<Reimagined | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    const res = await fetch(agentUrl(), {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'reimagine',
+        card: { answer: card.answer, kit: card.kit, story: card.story },
+        confused: confusedAnswer,
+        confusedKit: confused?.kit ?? '',
+      }),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as Partial<Reimagined>;
+    if (typeof j.kit !== 'string' || !isKit(j.kit) || typeof j.weird !== 'string') return null;
+    return {
+      kit: j.kit,
+      color: typeof j.color === 'string' && KIT_COLORS[j.color] ? j.color : 'natural',
+      modifier: typeof j.modifier === 'string' && isModifier(j.modifier) ? j.modifier : 'none',
+      weird: j.weird.slice(0, 200),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

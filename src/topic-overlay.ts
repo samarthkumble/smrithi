@@ -10,6 +10,7 @@ import { LOCI } from './palace-layout.js';
 import { loadPalace, nextReviewText } from './palace-store.js';
 import { preview } from './preview.js';
 import { saveSettings, settings, type Settings } from './settings.js';
+import { downloadCalendarFile, googleCalendarLink, sharedDeckFromUrl, sharePalace } from './share.js';
 import { START_CSS } from './start-screen-css.js';
 
 const SITE = 'smrithi-eight.vercel.app';
@@ -50,6 +51,7 @@ function stepLine(st: AgentStep): { cls: string; html: string } {
 const PREFS: { key: keyof Settings; label: string; note: string }[] = [
   { key: 'largeText', label: 'Larger captions', note: "Smriti's words, about a third bigger" },
   { key: 'calm', label: 'Calm motion', note: 'Nothing spins, bounces or drifts' },
+  { key: 'voice', label: "Smriti's voice", note: 'She reads every caption aloud' },
   { key: 'sound', label: 'Sounds', note: 'Chimes and a soft tanpura drone' },
   { key: 'ownRoom', label: 'Use my own room', note: 'Passthrough: leave memories around your real room' },
 ];
@@ -96,6 +98,7 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
         <button class="btn-line preview" type="button" hidden>${ICON.mouse}<span>Preview on this computer</span></button>
       </div>
       <p class="status" aria-live="polite"></p>
+      <button class="btn-line share-now" type="button" hidden>Share this palace</button>
     </main>
     <ol class="how" aria-label="How it works" title="See how it works">
       <li><i>1</i><span><b>Type it</b>Smriti picks the ideas and imagines a picture for each</span></li>
@@ -111,6 +114,11 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
   const previewBtn = $<HTMLButtonElement>('.preview');
   const prefsBtn = $<HTMLButtonElement>('.gear > button');
   const prefsBox = $<HTMLElement>('.prefs');
+  const shareNow = $<HTMLButtonElement>('.share-now');
+  shareNow.addEventListener('click', async () => {
+    const r = await sharePalace(deckSource.deck);
+    status.textContent = r === 'copied' ? 'Link copied. Anyone who opens it gets this exact palace.' : r === 'shared' ? 'Shared.' : status.textContent;
+  });
 
   // Ready palaces
   const deckButtons = PRESET_DECKS.map((d) => {
@@ -173,7 +181,41 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
       startReview(saved);
       enter(saved.room === 'own' && arOK, true);
     });
-    $<HTMLElement>('.panel').insertBefore(back, $<HTMLElement>('h1'));
+    const actions = document.createElement('div');
+    actions.className = 'back-actions';
+    const cal = document.createElement('a');
+    cal.href = googleCalendarLink(saved.deck.title, saved.nextReviewAt);
+    cal.target = '_blank';
+    cal.rel = 'noopener';
+    cal.textContent = 'Remind me in Google Calendar';
+    const ics = document.createElement('button');
+    ics.type = 'button';
+    ics.textContent = 'Download a calendar reminder';
+    ics.addEventListener('click', () => downloadCalendarFile(saved.deck.title, saved.nextReviewAt));
+    const share = document.createElement('button');
+    share.type = 'button';
+    share.textContent = 'Share this palace';
+    share.addEventListener('click', async () => {
+      const r = await sharePalace(saved.deck);
+      status.textContent = r === 'copied' ? 'Link copied. Send it to a friend to give them the same palace.' : r === 'shared' ? 'Shared.' : '';
+    });
+    actions.append(cal, ics, share);
+    const panel = $<HTMLElement>('.panel');
+    panel.insertBefore(back, $<HTMLElement>('h1'));
+    panel.insertBefore(actions, $<HTMLElement>('h1'));
+  }
+
+  // A friend's palace in the link: offer it first.
+  const shared = sharedDeckFromUrl();
+  if (shared) {
+    usePreset(shared);
+    preset = shared;
+    const gift = document.createElement('section');
+    gift.className = 'back gift';
+    gift.setAttribute('aria-label', 'A palace shared with you');
+    gift.innerHTML = `<span class="flame">${DECK_ICON.planets}</span><div class="txt"><b>A friend shared a palace with you.</b><span></span></div>`;
+    gift.querySelector('.txt span')!.textContent = `${shared.title}: ${shared.cards.length} memories, ready to place. Press Enter in VR, or preview it below.`;
+    $<HTMLElement>('.panel').insertBefore(gift, $<HTMLElement>('h1'));
   }
 
   // First-visit guide: four real screenshots, one per step.
@@ -284,6 +326,7 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
     if (deckSource.status === 'building')
       lines.push({ cls: 'wait', html: lines.length ? 'Imagining the next picture...' : 'Reading your topic and choosing what matters...' });
     log.innerHTML = lines.map((l) => `<li class="${l.cls}">${ICON[l.cls as 'ok' | 'fix' | 'wait']}<span>${l.html}</span></li>`).join('');
+    shareNow.hidden = deckSource.status !== 'ready';
     if (deckSource.status === 'ready') {
       status.textContent = vrOK
         ? `Your palace for "${deckSource.deck.title}" is ready.`

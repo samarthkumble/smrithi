@@ -23,12 +23,14 @@ import {
 } from '@iwsdk/core';
 import { makeAnswerOrb, ORB_COLORS, type OrbParts } from './answer-orb.js';
 import { chime } from './chime.js';
-import { deckSource } from './deck-source.js';
+import { deckSource, type Reimagined, reimagineCard } from './deck-source.js';
 import { OOP_DECK, type Deck, type MemoryCard } from './decks.js';
+import { Petals } from './fx.js';
 import { animateKit, styleKit, type Styled } from './kit-style.js';
 import { loadPalace, nextReviewText, recordReview, savePlacement } from './palace-store.js';
 import { preview } from './preview.js';
 import { settings } from './settings.js';
+import { hush, speak } from './voice.js';
 import { KITS } from './memory-kits.js';
 import { makeDiya, makeMarigold, makeSpotRing } from './memory-objects.js';
 import { LOCI, type Locus, TRAY } from './palace-layout.js';
@@ -55,6 +57,8 @@ function placedScale(locusId: string): number {
 type Mode = 'tutorial' | 'waiting' | 'place' | 'ready' | 'recall' | 'done';
 const TUTORIAL_ID = 'tutorial';
 const WEIRD_SCALE = 1.35;
+/** A giant picture is already big: the weird remake adds wobble, not more size. */
+const weirdBoost = (st: Styled | undefined) => (st?.modifier === 'giant' ? 1 : WEIRD_SCALE);
 const REVEAL_TIME = 0.45;
 
 interface Orb extends OrbParts {
@@ -123,12 +127,18 @@ export class SmritiSystem extends createSystem({
   private carried: Entity | null = null;
   private carryDist = 0.6;
   private ray = new Vector3();
+  // Celebration: pooled petals, a lamp flare that decays, and a trail clock for flights.
+  private petals = new Petals();
+  private flare = 0;
+  private trailClock = 0;
+  private fxPos = new Vector3();
 
   init(): void {
     this.setupCaption();
     this.spawnDiya();
     this.spawnMarkers();
     this.spawnOrbs();
+    this.world.createTransformEntity(this.petals.mesh);
     this.cleanupFuncs.push(
       // Outside the headset only the room and the start panel show.
       this.world.visibilityState.subscribe((state) => {
@@ -136,6 +146,7 @@ export class SmritiSystem extends createSystem({
         this.diya.visible = inXR;
         for (const e of this.queries.items.entities) if (e.object3D) e.object3D.visible = inXR && !this.hidden.has(e);
         this.markersVisible = inXR;
+        if (!inXR) hush();
         if (!inXR && this.ownRoom) {
           // Back in the browser: show Smriti's room again behind the start screen.
           const room = this.world.getSceneObject('palace-room');
@@ -195,7 +206,9 @@ export class SmritiSystem extends createSystem({
 
   private say(line: string, hint = ''): void {
     this.setCaption(this.stepLabel(), line, hint);
-    this.speakUntil = this.elapsed + Math.min(6, 1.5 + line.length * 0.05);
+    this.speakUntil = this.elapsed + Math.min(8, 1.5 + line.length * 0.06);
+    // Speak only inside the experience (headset or preview), never over the start screen.
+    if (this.begun) speak(line);
   }
 
   private spawnDiya(): void {
@@ -348,6 +361,7 @@ export class SmritiSystem extends createSystem({
     const st = this.styled.get(e);
     if (st) st.pivot.scale.setScalar(st.sizeScale);
     chime('soft');
+    this.petals.burst(this.fxPos.set(...(findLocus(f.locus)?.anchor ?? [0, 0, 0])), 18, 0.8);
     if (e === this.tutorial) {
       this.finishTutorial(e);
       return;
@@ -362,6 +376,7 @@ export class SmritiSystem extends createSystem({
     if (count >= total) {
       this.mode = 'ready';
       this.savePalaceNow();
+      this.celebrate(1.2);
       this.say(
         `All ${total} memories are in your palace. Look around once and say them in your head.`,
         preview.active ? 'When you are ready, click the orb below.' : 'When you are ready, touch the orb in front of you.',
@@ -619,6 +634,43 @@ export class SmritiSystem extends createSystem({
     this.say(intro, `${this.grabWord} a picture toward a glowing ring, and let go.`);
   }
 
+  /** Swap a memory's picture for the agent's new one, keep it in the deck, and celebrate the change. */
+  private applyReimagined(e: Entity, card: MemoryCard, res: Reimagined): void {
+    const old = this.styled.get(e);
+    const root = e.object3D;
+    if (!old || !root) return;
+    const kit = KITS[res.kit as keyof typeof KITS].make();
+    const next = styleKit(kit, res.color, res.modifier);
+    root.remove(old.pivot);
+    root.add(next.pivot);
+    next.root = old.root;
+    if (e.getValue(MemoryItem, 'phase') === MemoryPhase.Placed) next.pivot.scale.setScalar(next.sizeScale);
+    this.styled.set(e, next);
+    const formNames = kit.userData.morphForms as string[] | undefined;
+    if (formNames) {
+      const forms = formNames.map((nm) => kit.getObjectByName(nm)).filter((f): f is Object3D => !!f);
+      this.morphs.push({ forms, offset: Math.random() });
+    }
+    card.kit = res.kit as MemoryCard['kit'];
+    card.color = res.color;
+    card.modifier = res.modifier;
+    card.weird = res.weird;
+    this.reveal(e);
+    root.getWorldPosition(this.fxPos);
+    this.petals.burst(this.fxPos, 30, 1.1);
+    this.flare = 1;
+  }
+
+  /** The palace-complete moment: petals at every placed memory and the lamp flares. */
+  private celebrate(power: number): void {
+    this.flare = 1;
+    for (const it of this.queries.items.entities) {
+      if (it === this.tutorial || it.getValue(MemoryItem, 'phase') !== MemoryPhase.Placed) continue;
+      const a = findLocus(it.getValue(MemoryItem, 'locus') as string)?.anchor;
+      if (a) this.petals.burst(this.fxPos.set(...a), 16, power);
+    }
+  }
+
   // ---------------------------------------------------------------- recall
 
   private spawnOrbs(): void {
@@ -754,14 +806,25 @@ export class SmritiSystem extends createSystem({
     if (ok) {
       chime('right');
       this.reveal(e);
+      this.flare = 1;
+      const anchor = findLocus(e.getValue(MemoryItem, 'locus') as string)?.anchor;
+      if (anchor) this.petals.burst(this.fxPos.set(...anchor), 26, 1);
       this.say(`Yes. ${card.answer}.`, this.round === 2 ? 'The weird version stuck.' : '');
       this.later(2, () => this.askNext());
     } else {
       chime('wrong');
       this.weird.add(e);
       this.reveal(e);
-      this.say(card.weird, `You picked ${orb.value}. It was ${card.answer}.`);
-      this.later(5, () => this.askNext());
+      this.say(`It was ${card.answer}. Let me make it impossible to mix up with ${orb.value}.`, 'Smriti is reimagining this picture...');
+      // The agent sees what it was confused with and designs a new picture; the card's own line is the fallback.
+      const confusedCard = this.deck.cards.find((c) => c.answer === orb.value);
+      const round = this.round;
+      void reimagineCard(card, confusedCard, orb.value).then((res) => {
+        if (this.mode !== 'recall' || this.round !== round) return;
+        if (res) this.applyReimagined(e, card, res);
+        this.say(card.weird, res ? `Smriti redrew it because you picked ${orb.value}.` : `You picked ${orb.value}. It was ${card.answer}.`);
+        this.later(5, () => this.askNext());
+      });
     }
   }
 
@@ -784,9 +847,10 @@ export class SmritiSystem extends createSystem({
       if (!e.hasComponent(OneHandGrabbable)) e.addComponent(OneHandGrabbable, { rotate: true, translate: true });
     }
     const weirdIds = [...this.weird].map((e) => this.cards.get(e)?.id ?? '').filter(Boolean);
-    if (!loadPalace()) this.savePalaceNow();
+    this.savePalaceNow(); // keeps reimagined pictures for the next review
     const saved = recordReview(first, total, weirdIds);
     chime(first === total ? 'right' : 'soft');
+    this.celebrate(first === total ? 1.4 : 0.7);
     const after = this.secondTry.size > 0 ? ` After the weird remake, ${first + recovered} of ${total}.` : '';
     const streak = saved ? ` Streak: ${saved.streak} day${saved.streak === 1 ? '' : 's'}.` : '';
     const next = saved ? `${nextReviewText(saved)}. ` : '';
@@ -823,7 +887,7 @@ export class SmritiSystem extends createSystem({
       const nt = Math.min(1, rt + delta / REVEAL_TIME);
       this.reveals.set(e, nt);
       const locus = e.getValue(MemoryItem, 'locus') as string;
-      const base = (locus ? placedScale(locus) : this.trayScale) * (this.weird.has(e) ? WEIRD_SCALE : 1);
+      const base = (locus ? placedScale(locus) : this.trayScale) * (this.weird.has(e) ? weirdBoost(this.styled.get(e)) : 1);
       const k = 1 + Math.sin(nt * Math.PI) * 0.25 * (1 - nt);
       const sc = base * nt * k;
       obj.scale.set(sc, sc, sc);
@@ -834,7 +898,7 @@ export class SmritiSystem extends createSystem({
       const obj = e.object3D;
       if (!obj || this.reveals.has(e) || this.flights.has(e) || this.hidden.has(e)) continue;
       if (e.getValue(MemoryItem, 'phase') !== MemoryPhase.Placed) continue;
-      const base = placedScale(e.getValue(MemoryItem, 'locus') as string) * WEIRD_SCALE;
+      const base = placedScale(e.getValue(MemoryItem, 'locus') as string) * weirdBoost(this.styled.get(e));
       const w = base * (1 + Math.sin(t * 4.2) * 0.06);
       if (settings.calm) {
         obj.scale.setScalar(base);
@@ -853,6 +917,11 @@ export class SmritiSystem extends createSystem({
       orb.ball.scale.set(s, s, s);
     }
     // Flights: smooth arc to the target, upright on landing
+    this.trailClock -= delta;
+    const dropTrail = this.trailClock <= 0;
+    if (dropTrail) this.trailClock = 0.045;
+    this.petals.update(delta);
+    this.flare = Math.max(0, this.flare - delta * 1.2);
     for (const [e, f] of this.flights) {
       const obj = e.object3D;
       if (!obj) continue;
@@ -864,6 +933,7 @@ export class SmritiSystem extends createSystem({
       const sc = obj.scale.x + (target - obj.scale.x) * Math.min(1, delta * 6);
       obj.scale.set(sc, sc, sc);
       obj.quaternion.slerp(this.upright, Math.min(1, delta * 8));
+      if (f.locus && dropTrail) this.petals.trail(obj.position);
       if (f.t >= 1) {
         const fin = f.locus ? placedScale(f.locus) : e === this.tutorial ? 2.2 : this.trayScale;
         obj.scale.set(fin, fin, fin);
@@ -894,7 +964,7 @@ export class SmritiSystem extends createSystem({
       const speaking = t < this.speakUntil;
       const flick = 0.85 + Math.sin(t * 17) * 0.08 + Math.sin(t * 7.3) * 0.07;
       if (this.flame) this.flame.scale.set(0.8 * flick, 2 * flick * (speaking ? 1.25 : 1), 0.8 * flick);
-      this.glow.intensity = (speaking ? 0.6 : 0.35) * flick;
+      this.glow.intensity = ((speaking ? 0.6 : 0.35) + this.flare * 1.6) * flick;
     }
   }
 }
