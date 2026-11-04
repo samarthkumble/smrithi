@@ -167,8 +167,34 @@ export class SmritiSystem extends createSystem({
     };
   }
 
+  private asked = 0;
+
+  /** The caption's top line: who is speaking and where the person is in the session. */
+  private stepLabel(): string {
+    const total = this.deck.cards.length;
+    switch (this.mode) {
+      case 'tutorial':
+        return `SMRITI  -  First, learn the ${preview.active ? 'drag' : 'pinch'}`;
+      case 'waiting':
+        return 'SMRITI  -  Building your palace';
+      case 'place': {
+        let placed = 0;
+        for (const it of this.queries.items.entities)
+          if (it !== this.tutorial && it.getValue(MemoryItem, 'phase') === MemoryPhase.Placed) placed++;
+        return `SMRITI  -  Step 1 of 2: place your memories (${placed} of ${total})`;
+      }
+      case 'ready':
+        return deckSource.review ? 'SMRITI  -  Review' : 'SMRITI  -  Step 1 of 2 done';
+      case 'recall':
+        if (this.round === 2) return 'SMRITI  -  Second look';
+        return this.asked ? `SMRITI  -  Step 2 of 2: test (${this.asked} of ${total})` : 'SMRITI  -  Step 2 of 2: test';
+      case 'done':
+        return 'SMRITI  -  All done';
+    }
+  }
+
   private say(line: string, hint = ''): void {
-    this.setCaption('SMRITI', line, hint);
+    this.setCaption(this.stepLabel(), line, hint);
     this.speakUntil = this.elapsed + Math.min(6, 1.5 + line.length * 0.05);
   }
 
@@ -542,7 +568,7 @@ export class SmritiSystem extends createSystem({
     this.home.set(e, home);
     this.tutorial = e;
     this.say(
-      'Hi, I am Smriti, the little lamp. This room will hold what you learn.',
+      'Hi, I am Smriti, the little lamp. I turn what you learn into pictures. You place them around this room, then I test you.',
       preview.active
         ? 'First, click the marigold below and drag it onto a glowing ring.'
         : 'First, pinch the marigold in front of you with your thumb and finger.',
@@ -649,6 +675,7 @@ export class SmritiSystem extends createSystem({
   private startRecall(): void {
     this.mode = 'recall';
     this.round = 1;
+    this.asked = 0;
     this.firstTry.clear();
     this.secondTry.clear();
     this.hideOrbs();
@@ -684,6 +711,7 @@ export class SmritiSystem extends createSystem({
       return;
     }
     const e = this.queue.shift()!;
+    if (this.round === 1) this.asked++;
     const card = this.cards.get(e)!;
     this.current = e;
     this.askLocus = e.getValue(MemoryItem, 'locus') as string;
@@ -781,7 +809,7 @@ export class SmritiSystem extends createSystem({
       if (deckSource.status === 'building') {
         if (deckSource.steps.length !== this.seenSteps) {
           this.seenSteps = deckSource.steps.length;
-          this.setCaption('SMRITI', 'I am imagining your palace...', this.progressHint());
+          this.setCaption(this.stepLabel(), 'I am imagining your palace...', this.progressHint());
         }
       } else {
         this.arriveDeck();

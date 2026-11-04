@@ -82,7 +82,7 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
     </header>
     <main class="panel">
       <h1>A memory palace that builds itself.</h1>
-      <p class="lede">Tell Smriti what you need to remember. Each idea becomes a vivid picture that you place around a Mangalore home with your own hands.</p>
+      <p class="lede">Tell Smriti what you need to remember. Each idea becomes a vivid picture that you place around a Mangalore home with your own hands, then Smriti tests you. <button type="button" class="howlink">See how it works</button></p>
       <form class="composer" novalidate>
         <label for="smr-topic">What do you want to remember?</label>
         <textarea id="smr-topic" maxlength="1500" placeholder="A topic, or paste your notes. Try: the causes of World War 1"></textarea>
@@ -97,7 +97,7 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
       </div>
       <p class="status" aria-live="polite"></p>
     </main>
-    <ol class="how" aria-label="How it works">
+    <ol class="how" aria-label="How it works" title="See how it works">
       <li><i>1</i><span><b>Type it</b>Smriti picks the ideas and imagines a picture for each</span></li>
       <li><i>2</i><span><b>Place it</b>Carry each picture to a spot in the room</span></li>
       <li><i>3</i><span><b>Remember it</b>Smriti hides them and walks you back through</span></li>
@@ -175,6 +175,56 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
     });
     $<HTMLElement>('.panel').insertBefore(back, $<HTMLElement>('h1'));
   }
+
+  // First-visit guide: four real screenshots, one per step.
+  const base = import.meta.env.BASE_URL;
+  const guide = document.createElement('div');
+  guide.id = 'smriti-guide';
+  guide.hidden = true;
+  guide.setAttribute('role', 'dialog');
+  guide.setAttribute('aria-modal', 'true');
+  guide.setAttribute('aria-labelledby', 'smr-guide-title');
+  guide.innerHTML = `
+    <div class="sheet">
+      <button class="x" type="button" aria-label="Close">×</button>
+      <h2 id="smr-guide-title">How Smriti works</h2>
+      <p class="sub">Smriti turns what you study into a memory palace: strange pictures placed around a room, so you can walk back through them and remember. It takes about ten minutes.</p>
+      <ol>
+        <li><img src="${base}howto/1-type.jpg" alt="The start screen with a topic typed and Smriti's steps listed below it"><div><i>1</i><b>Tell Smriti what to learn</b><span>Type a topic or paste your notes, or pick a ready palace. Smriti's AI picks the ideas worth remembering.</span></div></li>
+        <li><img src="${base}howto/2-pictures.jpg" alt="Twenty picture types: a rocket, a key, scales, a heart, a bridge and more"><div><i>2</i><b>Each idea becomes a picture</b><span>A vivid object stands for each idea: a capsule locked around a chest for Encapsulation, a red war shield for Mars.</span></div></li>
+        <li><img src="${base}howto/3-place.jpg" alt="Inside the room, a burning pink heart placed on the swing, with Smriti's caption"><div><i>3</i><b>Place them around the room</b><span>In the headset, pinch a picture and carry it to a glowing spot: the swing, the bookshelf, the window. On a computer, drag it with the mouse.</span></div></li>
+        <li><img src="${base}howto/4-test.jpg" alt="Three answer orbs, one marked with a tick and one with a cross"><div><i>4</i><b>Smriti tests you, then brings you back</b><span>The pictures vanish and one spot glows: pick what you left there. A miss comes back weirder, and Smriti asks again after 1, 3 and 7 days.</span></div></li>
+      </ol>
+      <p class="why">Memory champions use this method, the memory palace. In a 2018 University of Maryland study, people remembered 8.8% more with a memory palace in VR than on a regular screen.</p>
+      <div class="foot"><button class="go" type="button">Got it, let's start</button></div>
+    </div>`;
+  let lastFocus: HTMLElement | null = null;
+  const openGuide = () => {
+    lastFocus = document.activeElement as HTMLElement | null;
+    guide.hidden = false;
+    const sheet = guide.querySelector('.sheet') as HTMLElement;
+    sheet.scrollTop = 0;
+    (guide.querySelector('.go') as HTMLButtonElement).focus({ preventScroll: true });
+  };
+  const closeGuide = () => {
+    guide.hidden = true;
+    try {
+      localStorage.setItem('smriti.seenGuide', '1');
+    } catch {
+      /* ignore */
+    }
+    (lastFocus ?? text).focus?.();
+  };
+  guide.querySelector('.x')!.addEventListener('click', closeGuide);
+  guide.querySelector('.go')!.addEventListener('click', closeGuide);
+  guide.addEventListener('click', (e) => {
+    if (e.target === guide) closeGuide();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !guide.hidden) closeGuide();
+  });
+  $<HTMLButtonElement>('.howlink').addEventListener('click', openGuide);
+  $<HTMLElement>('.how').addEventListener('click', openGuide);
 
   const typedTopic = () => text.value.trim();
   const refresh = () => {
@@ -271,6 +321,14 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
   document.head.appendChild(style);
   document.body.appendChild(root);
   document.body.appendChild(hud);
+  document.body.appendChild(guide);
+  let seenGuide = false;
+  try {
+    seenGuide = localStorage.getItem('smriti.seenGuide') === '1';
+  } catch {
+    /* ignore */
+  }
+  if (!seenGuide && !saved) openGuide();
   document.getElementById('boot')?.remove();
 
   return {
@@ -285,6 +343,7 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
       window.clearInterval(timer);
       root.remove();
       hud.remove();
+      guide.remove();
       style.remove();
     },
   };

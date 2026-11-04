@@ -85,6 +85,29 @@ export const START_CSS = `
 #smriti-hud b{color:#F1C86F;font-weight:700}
 #smriti-hud button{flex:none;font:600 13px/1 'Hanken Grotesk',system-ui,sans-serif;border:1px solid rgba(212,162,76,.4);background:transparent;color:#EFE6D6;padding:9px 14px;border-radius:999px;cursor:pointer}
 #smriti-hud button:hover{border-color:#F1C86F;color:#F1C86F}
+#smriti-guide{position:fixed;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(14,9,6,.72);backdrop-filter:blur(3px);
+  color:#EFE6D6;font:16px/1.5 'Hanken Grotesk',system-ui,sans-serif}
+#smriti-guide[hidden]{display:none}
+#smriti-guide .sheet{position:relative;width:min(1120px,100%);max-height:calc(100vh - 32px);overflow-y:auto;padding:28px;border-radius:22px;background:#24170F;border:1px solid rgba(212,162,76,.32);box-shadow:0 30px 80px rgba(0,0,0,.55);animation:smr-rise .35s cubic-bezier(.2,.7,.2,1) both}
+#smriti-guide h2{margin:0 40px 6px 0;font:400 clamp(26px,3.2vw,36px)/1.1 'Tiro Devanagari Sanskrit',Georgia,serif;color:#EFE6D6}
+#smriti-guide .sub{margin:0 0 20px;color:#BFAF98;max-width:62ch}
+#smriti-guide .x{position:absolute;top:18px;right:18px;width:40px;height:40px;border-radius:50%;border:1px solid #3D2A1E;background:transparent;color:#BFAF98;font-size:22px;line-height:1;cursor:pointer}
+#smriti-guide .x:hover{color:#F1C86F;border-color:#D4A24C}
+#smriti-guide ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+#smriti-guide li{display:flex;flex-direction:column;border-radius:16px;overflow:hidden;background:#2B1D15;border:1px solid #3D2A1E}
+#smriti-guide li img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:#1E1410}
+#smriti-guide li div{padding:12px 14px 14px;display:grid;grid-template-columns:auto 1fr;column-gap:10px;row-gap:4px}
+#smriti-guide li i{grid-row:span 2;font:400 30px/1 'Tiro Devanagari Sanskrit',Georgia,serif;font-style:normal;color:#F1C86F}
+#smriti-guide li b{font-weight:700;font-size:16px;color:#EFE6D6}
+#smriti-guide li span{font-size:14px;color:#BFAF98}
+#smriti-guide .why{margin:18px 0 0;padding:12px 14px;border-left:2px solid #D4A24C;color:#BFAF98;font-size:14px;max-width:80ch}
+#smriti-guide .foot{display:flex;justify-content:flex-end;margin-top:18px}
+#smriti-guide .go{border:0;border-radius:12px;padding:13px 22px;font:700 16px/1 'Hanken Grotesk',system-ui,sans-serif;color:#241509;background:linear-gradient(180deg,#F1C86F,#D4A24C);cursor:pointer}
+#smriti-guide .go:focus-visible,#smriti-guide .x:focus-visible{outline:3px solid #F1C86F;outline-offset:3px}
+#smriti-start .howlink{border:0;background:none;padding:0;color:var(--brass-hi);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+#smriti-start .how{cursor:pointer}
+@media (max-width:1000px){#smriti-guide ol{grid-template-columns:repeat(2,1fr)}#smriti-guide li img{aspect-ratio:16/9}}
+@media (max-width:640px){#smriti-guide ol{grid-template-columns:1fr}#smriti-guide .sheet{padding:20px}}
 @media (max-width:860px){
   #smriti-start .scrim{background:linear-gradient(0deg,rgba(24,15,10,.96) 0,rgba(24,15,10,.85) 55%,rgba(24,15,10,.35) 100%)}
   #smriti-start .badge span{display:none}
