@@ -13,6 +13,7 @@ import {
   PointsMaterial,
   VisibilityState,
 } from '@iwsdk/core';
+import { preview } from './preview.js';
 import { settings } from './settings.js';
 import { Tanpura } from './tanpura.js';
 
@@ -25,6 +26,7 @@ export class AmbienceSystem extends createSystem({}) {
   private flames: Object3D[] = [];
   private t = 0;
   private tanpura = new Tanpura();
+  private previewSound = false;
 
   init(): void {
     this.pos = new Float32Array(MOTES * 3);
@@ -66,6 +68,10 @@ export class AmbienceSystem extends createSystem({}) {
 
   update(delta: number): void {
     this.t += delta;
+    if (preview.active && !this.previewSound && settings.sound) {
+      this.previewSound = true;
+      this.tanpura.start();
+    }
     this.tanpura.tick();
     for (let i = 0; i < MOTES; i++) this.place(i, this.seed[i]);
     this.attr.needsUpdate = true;

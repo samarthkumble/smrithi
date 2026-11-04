@@ -1,174 +1,291 @@
 /**
- * Start screen (2D only): type what you want to remember, or pick a ready deck,
- * then enter. Typing happens here because the headset keyboard works in 2D pages.
+ * The start screen (2D only), over the live room. Type what you want to remember
+ * or pick a ready palace, then enter in VR, or preview with a mouse on a computer.
+ * Typing happens here because the headset keyboard works in 2D pages.
  */
 import { SessionMode, VisibilityState, type World } from '@iwsdk/core';
-import { buildFromTopic, deckSource, startReview, usePreset } from './deck-source.js';
+import { type AgentStep, buildFromTopic, deckSource, startReview, usePreset } from './deck-source.js';
+import { type Deck, PRESET_DECKS } from './decks.js';
+import { LOCI } from './palace-layout.js';
 import { loadPalace, nextReviewText } from './palace-store.js';
+import { preview } from './preview.js';
 import { saveSettings, settings, type Settings } from './settings.js';
-import { PRESET_DECKS } from './decks.js';
-
-const CSS = `
-#smriti-start{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);width:min(560px,calc(100vw - 32px));
-  box-sizing:border-box;padding:18px 18px 16px;border-radius:18px;background:rgba(34,22,14,.92);color:#F7EEDC;
-  font:15px/1.4 system-ui,"Segoe UI",sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.45);z-index:10}
-#smriti-start .eyebrow{font-size:11px;letter-spacing:1.4px;font-weight:700;color:#CDBB9E;margin-bottom:4px}
-#smriti-start h2{margin:0 0 8px;font-size:18px;font-weight:650;color:#F3C35B}
-#smriti-start textarea{width:100%;box-sizing:border-box;min-height:64px;resize:vertical;border-radius:12px;border:1px solid #6b4a2c;
-  background:#1d130c;color:#F7EEDC;padding:10px 12px;font:inherit}
-#smriti-start textarea:focus{outline:2px solid #E3A21A;border-color:transparent}
-#smriti-start .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
-#smriti-start .chip{border:1px solid #7a5532;background:transparent;color:#F7EEDC;border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer}
-#smriti-start .chip[aria-pressed=true]{background:#E3A21A;color:#24160c;border-color:#E3A21A}
-#smriti-start .go{margin-left:auto;border:0;border-radius:12px;background:#E3A21A;color:#24160c;font-weight:700;padding:10px 16px;font:inherit;cursor:pointer}
-#smriti-start .go:disabled{opacity:.5;cursor:default}
-#smriti-start .back{display:flex;gap:12px;align-items:center;margin:0 0 14px;padding:12px 14px;border-radius:14px;background:#3a2616;border:1px solid #8a5f33}
-#smriti-start .back b{color:#F3C35B}
-#smriti-start .back small{display:block;color:#CDBB9E}
-#smriti-start .back button{margin-left:auto;flex:none}
-#smriti-start .prefs{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:13px;color:#CDBB9E}
-#smriti-start .prefs label{display:flex;gap:6px;align-items:center;cursor:pointer}
-#smriti-start .prefs label[hidden]{display:none}
-#smriti-start .prefs input{accent-color:#E3A21A;width:16px;height:16px}
-#smriti-start .status{margin-top:8px;min-height:20px;color:#CDBB9E;font-size:13px}
-`;
+import { START_CSS } from './start-screen-css.js';
 
 const SITE = 'smrithi-eight.vercel.app';
-const NO_HEADSET = `Smriti is a VR experience. Open ${SITE} in the browser on a Meta Quest to step inside.`;
+
+const ICON = {
+  headset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5A2.5 2.5 0 0 1 5.5 7h13A2.5 2.5 0 0 1 21 9.5v5a2.5 2.5 0 0 1-2.5 2.5h-3.1a2 2 0 0 1-1.7-.95l-.9-1.5a1 1 0 0 0-1.7 0l-.9 1.5a2 2 0 0 1-1.7.95H5.5A2.5 2.5 0 0 1 3 14.5z"/></svg>',
+  hand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11m0-1.5v-6a1.5 1.5 0 0 1 3 0V11m0-4.5a1.5 1.5 0 0 1 3 0V12m0-2.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-4.8-2.4L4.6 15.4a1.6 1.6 0 0 1 2.4-2.1L8 14.3"/></svg>',
+  mouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  flame: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3c1.5 3.2 5 5.4 5 9.5a5 5 0 0 1-10 0c0-2.2 1.2-3.6 2.4-4.6.2 1.6 1 2.6 2.1 3.1C11 8.7 11.2 5.6 12 3z"/><path d="M5 21h14" /></svg>',
+  ok: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>',
+  fix: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9M20 4v5h-5M20 12a8 8 0 0 1-13.7 5.6L4 15M4 20v-5h5"/></svg>',
+  wait: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3a9 9 0 1 1-9 9"/></svg>',
+};
+
+/** Small line drawings for the ready palaces. */
+const DECK_ICON: Record<string, string> = {
+  'oop-pillars': '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M16 4l9 6v12l-9 6-9-6V10z"/><path d="M7 10l9 6 9-6M16 16v12"/></svg>',
+  acid: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="14" width="18" height="13" rx="2.5"/><path d="M11 14V10a5 5 0 0 1 10 0v4M16 19v3"/></svg>',
+  planets: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="16" cy="16" r="7"/><ellipse cx="16" cy="16" rx="14" ry="4.5" transform="rotate(-20 16 16)"/></svg>',
+};
+
+const shortTitle = (d: Deck) => d.title.replace(' of transactions', '').replace(', in order from the Sun', '');
+const words = (id: string) => id.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/TV/, ' TV').toLowerCase().replace(/ tv/, ' TV').trim();
+const spotName = (id: string) => LOCI.find((l) => l.id === id)?.label ?? id;
+
+/** Turn one checked tool call into a line a person can read. */
+function stepLine(st: AgentStep): { cls: string; html: string } {
+  const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] as string);
+  if (!st.ok) return { cls: 'fix', html: `Sent back to fix: ${esc(st.note)}` };
+  if (st.tool === 'plan_palace') return { cls: 'ok', html: `Chose <b>${esc(st.note.replace(' facts planned', ''))}</b> things worth remembering` };
+  if (st.tool === 'finish_palace') return { cls: 'ok', html: '<b>Palace ready</b>' };
+  const m = st.note.match(/^(.+) -> (\w+) on (\w+)$/);
+  if (m) return { cls: 'ok', html: `<b>${esc(m[1])}</b>: a ${esc(words(m[2]))} on ${esc(spotName(m[3]))}` };
+  return { cls: 'ok', html: esc(st.note) };
+}
+
+const PREFS: { key: keyof Settings; label: string; note: string }[] = [
+  { key: 'largeText', label: 'Larger captions', note: "Smriti's words, about a third bigger" },
+  { key: 'calm', label: 'Calm motion', note: 'Nothing spins, bounces or drifts' },
+  { key: 'sound', label: 'Sounds', note: 'Chimes and a soft tanpura drone' },
+  { key: 'ownRoom', label: 'Use my own room', note: 'Passthrough: leave memories around your real room' },
+];
 
 /**
  * Mounted before the 3D world finishes loading, so the page is never blank.
  * ready() is called once the world exists; until then, Enter explains it is loading.
  */
-export function mountTopicOverlay(): {
-  ready(world: World): void;
-  dispose(): void;
-} {
+export function mountTopicOverlay(): { ready(world: World): void; dispose(): void } {
   let world: World | null = null;
   let vrOK = false;
-  /** Returns true if the session was started; otherwise explains why not in the status line. */
-  const tryEnter = (ownRoom: boolean): boolean => {
-    if (!world) {
-      status.textContent = 'Still getting the room ready, one moment...';
-      return false;
-    }
-    if (!vrOK || !world.xrEnabled) {
-      status.textContent = NO_HEADSET;
-      return false;
-    }
-    world.launchXR({ sessionMode: ownRoom ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR });
-    return true;
-  };
-  const style = document.createElement('style');
-  style.textContent = CSS;
-  const root = document.createElement('section');
-  root.id = 'smriti-start';
-  root.setAttribute('aria-label', 'Start Smriti');
-  root.innerHTML = `
-    <div class="eyebrow">SMRITI · A MEMORY PALACE THAT BUILDS ITSELF</div>
-    <h2>What do you want to remember?</h2>
-    <textarea maxlength="1500" placeholder="A topic, or paste your notes. For example: the causes of World War 1"></textarea>
-    <div class="row" role="group" aria-label="Ready decks">
-      <span style="color:#CDBB9E;font-size:13px">Or try:</span>
-    </div>
-    <div class="row"><span class="status" aria-live="polite"></span><button class="go main" type="button">Build my palace</button></div>
-    <div class="prefs" role="group" aria-label="Comfort">
-      <label><input type="checkbox" data-pref="largeText">Larger captions</label>
-      <label><input type="checkbox" data-pref="calm">Calm motion</label>
-      <label><input type="checkbox" data-pref="sound">Sounds</label>
-      <label class="own" hidden><input type="checkbox" data-pref="ownRoom">Use my own room (passthrough)</label>
-    </div>`;
   let arOK = false;
-  void navigator.xr?.isSessionSupported('immersive-ar').then((ok) => {
-    arOK = ok;
-    (root.querySelector('.own') as HTMLElement).hidden = !ok;
-  }).catch(() => {});
-  for (const box of root.querySelectorAll<HTMLInputElement>('input[data-pref]')) {
-    const key = box.dataset.pref as keyof Settings;
-    box.checked = settings[key];
-    box.addEventListener('change', () => {
-      settings[key] = box.checked;
-      saveSettings();
-    });
-  }
-  const saved = loadPalace();
-  if (saved) {
-    const back = document.createElement('div');
-    back.className = 'back';
-    const streak = saved.streak > 0 ? ` · ${saved.streak}-day streak` : '';
-    back.innerHTML = `<div><b>Welcome back.</b> Your palace is waiting.<small></small></div><button class="go" type="button">Review my palace</button>`;
-    const where = saved.room === 'own' ? ' · in your own room' : '';
-    back.querySelector('small')!.textContent = `${saved.deck.title}${where} · ${nextReviewText(saved)}${streak}`;
-    back.querySelector('button')!.addEventListener('click', () => {
-      startReview(saved);
-      tryEnter(saved.room === 'own' && arOK);
-    });
-    root.insertBefore(back, root.querySelector('h2'));
-  }
-  const text = root.querySelector('textarea')!;
-  const chipsRow = root.querySelectorAll('.row')[0] as HTMLElement;
-  const go = root.querySelector('.go.main') as HTMLButtonElement;
-  const status = root.querySelector('.status') as HTMLElement;
-  let preset = PRESET_DECKS[0];
-  const chips = PRESET_DECKS.map((d) => {
+  let preset: Deck = deckSource.deck;
+
+  const style = document.createElement('style');
+  style.textContent = START_CSS;
+  const root = document.createElement('div');
+  root.id = 'smriti-start';
+  root.innerHTML = `
+    <div class="scrim"></div>
+    <header class="top">
+      <div class="mark" aria-label="Smriti"><span class="dev" lang="sa">स्मृति</span><span class="lat">Smriti</span></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div class="badge">${ICON.hand}<span>Made for Meta Quest, played with your hands</span></div>
+        <div class="gear">
+          <button type="button" aria-expanded="false" aria-controls="smr-prefs">${ICON.gear}<span>Comfort</span></button>
+          <div class="prefs" id="smr-prefs" role="group" aria-label="Comfort settings" hidden></div>
+        </div>
+      </div>
+    </header>
+    <main class="panel">
+      <h1>A memory palace that builds itself.</h1>
+      <p class="lede">Tell Smriti what you need to remember. Each idea becomes a vivid picture that you place around a Mangalore home with your own hands.</p>
+      <form class="composer" novalidate>
+        <label for="smr-topic">What do you want to remember?</label>
+        <textarea id="smr-topic" maxlength="1500" placeholder="A topic, or paste your notes. Try: the causes of World War 1"></textarea>
+        <div class="row"><span class="count"></span><button class="btn-brass build" type="submit">Build my palace</button></div>
+      </form>
+      <ol class="log" aria-live="polite" hidden></ol>
+      <h2>Or start with a ready palace</h2>
+      <div class="decks" role="group" aria-label="Ready palaces"></div>
+      <div class="cta">
+        <button class="btn-brass enter" type="button">${ICON.headset}<span>Enter in VR</span></button>
+        <button class="btn-line preview" type="button" hidden>${ICON.mouse}<span>Preview on this computer</span></button>
+      </div>
+      <p class="status" aria-live="polite"></p>
+    </main>
+    <ol class="how" aria-label="How it works">
+      <li><i>1</i><span><b>Type it</b>Smriti picks the ideas and imagines a picture for each</span></li>
+      <li><i>2</i><span><b>Place it</b>Carry each picture to a spot in the room</span></li>
+      <li><i>3</i><span><b>Remember it</b>Smriti hides them and walks you back through</span></li>
+    </ol>`;
+  const $ = <T extends HTMLElement>(sel: string) => root.querySelector(sel) as T;
+  const text = $<HTMLTextAreaElement>('textarea');
+  const count = $<HTMLElement>('.count');
+  const log = $<HTMLOListElement>('.log');
+  const status = $<HTMLElement>('.status');
+  const enterBtn = $<HTMLButtonElement>('.enter');
+  const previewBtn = $<HTMLButtonElement>('.preview');
+  const prefsBtn = $<HTMLButtonElement>('.gear > button');
+  const prefsBox = $<HTMLElement>('.prefs');
+
+  // Ready palaces
+  const deckButtons = PRESET_DECKS.map((d) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'chip';
-    b.textContent = d.title.replace(' of transactions', '').replace(', in order from the Sun', '');
+    b.className = 'deck';
+    b.innerHTML = `${DECK_ICON[d.id] ?? ''}<span><span class="t">${shortTitle(d)}</span><br><span class="n">${d.cards.length} memories</span></span>`;
     b.addEventListener('click', () => {
       preset = d;
       text.value = '';
+      usePreset(d);
+      log.hidden = true;
+      status.textContent = '';
       refresh();
     });
-    chipsRow.appendChild(b);
+    $<HTMLElement>('.decks').appendChild(b);
     return { b, d };
   });
-  const refresh = () => {
-    const typed = text.value.trim().length >= 3;
-    for (const c of chips) c.b.setAttribute('aria-pressed', String(!typed && c.d === preset));
-    go.textContent = typed ? 'Build my palace' : 'Enter Smriti';
 
+  // Comfort switches
+  for (const p of PREFS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sw';
+    b.setAttribute('role', 'switch');
+    b.dataset.pref = p.key;
+    b.innerHTML = `<span>${p.label}<small>${p.note}</small></span><span class="knob" aria-hidden="true"></span>`;
+    b.setAttribute('aria-checked', String(settings[p.key]));
+    if (p.key === 'ownRoom') b.hidden = true;
+    b.addEventListener('click', () => {
+      settings[p.key] = !settings[p.key];
+      b.setAttribute('aria-checked', String(settings[p.key]));
+      saveSettings();
+    });
+    prefsBox.appendChild(b);
+  }
+  prefsBtn.addEventListener('click', () => {
+    const open = prefsBox.hidden;
+    prefsBox.hidden = !open;
+    prefsBtn.setAttribute('aria-expanded', String(open));
+  });
+  document.addEventListener('click', (e) => {
+    if (!prefsBox.hidden && !(e.target as HTMLElement).closest?.('.gear')) {
+      prefsBox.hidden = true;
+      prefsBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  // Coming back: the saved palace goes first.
+  const saved = loadPalace();
+  if (saved) {
+    const back = document.createElement('section');
+    back.className = 'back';
+    back.setAttribute('aria-label', 'Your saved palace');
+    const streak = saved.streak > 0 ? `${saved.streak}-day streak. ` : '';
+    const where = saved.room === 'own' ? ' (in your own room)' : '';
+    back.innerHTML = `<span class="flame">${ICON.flame}</span><div class="txt"><b>Welcome back. Your palace is waiting.</b><span></span></div><button class="btn-brass" type="button">Review my palace</button>`;
+    back.querySelector('.txt span')!.textContent = `${saved.deck.title}${where}. ${streak}${nextReviewText(saved)}.`;
+    back.querySelector('button')!.addEventListener('click', () => {
+      startReview(saved);
+      enter(saved.room === 'own' && arOK, true);
+    });
+    $<HTMLElement>('.panel').insertBefore(back, $<HTMLElement>('h1'));
+  }
+
+  const typedTopic = () => text.value.trim();
+  const refresh = () => {
+    const typed = typedTopic().length >= 3;
+    for (const c of deckButtons) c.b.setAttribute('aria-pressed', String(!typed && c.d === preset));
+    count.textContent = text.value.length > 1200 ? `${1500 - text.value.length} characters left` : '';
   };
   text.addEventListener('input', refresh);
-  go.addEventListener('click', () => {
-    const typed = text.value.trim();
-    if (typed.length >= 3) void buildFromTopic(typed);
-    else usePreset(preset);
-    tryEnter(settings.ownRoom && arOK);
+
+  /** Enter the headset, or (on a computer) explain or start the mouse preview. */
+  const enter = (ownRoom: boolean, allowPreview: boolean): void => {
+    if (!world) {
+      status.textContent = 'Still getting the room ready, one moment.';
+      return;
+    }
+    if (vrOK && world.xrEnabled) {
+      world.launchXR({ sessionMode: ownRoom ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR });
+      return;
+    }
+    if (allowPreview) startPreviewMode();
+    else status.textContent = `No headset here. Open ${SITE} in a Meta Quest browser, or preview it with your mouse.`;
+  };
+
+  const startPreviewMode = () => {
+    preview.active = true;
+    root.style.display = 'none';
+    hud.hidden = false;
+  };
+
+  // Building with the agent: each checked step appears as it happens.
+  $<HTMLFormElement>('.composer').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const topic = typedTopic();
+    if (topic.length < 3) {
+      status.textContent = 'Type a topic first, or pick a ready palace below.';
+      text.focus();
+      return;
+    }
+    void buildFromTopic(topic);
+    if (vrOK && world?.xrEnabled) enter(settings.ownRoom && arOK, false);
   });
-  // Live progress while the agent builds (also useful if the person is still in 2D).
+  enterBtn.addEventListener('click', () => enter(settings.ownRoom && arOK, false));
+  previewBtn.addEventListener('click', () => {
+    if (!world) {
+      status.textContent = 'Still getting the room ready, one moment.';
+      return;
+    }
+    startPreviewMode();
+  });
+
   let seen = -1;
   const timer = window.setInterval(() => {
     if (deckSource.version === seen || !deckSource.topic) return;
     seen = deckSource.version;
-    const made = deckSource.steps.filter((st) => st.ok && st.tool === 'create_image').length;
-    if (deckSource.status === 'building') status.textContent = made ? `Smriti is imagining... ${made} images so far` : 'Smriti is choosing what to remember...';
-    else if (deckSource.status === 'ready')
-      status.textContent = `Ready: ${deckSource.deck.cards.length} memories for "${deckSource.deck.title}".${vrOK ? '' : ' Open this link on a Meta Quest to place them.'}`;
-    else status.textContent = `Could not build it: ${deckSource.error}`;
-  }, 300);
-  refresh();
-  document.head.appendChild(style);
-  document.body.appendChild(root);
-  document.getElementById('boot')?.remove();
+    log.hidden = false;
+    const lines = deckSource.steps.map(stepLine);
+    if (deckSource.status === 'building')
+      lines.push({ cls: 'wait', html: lines.length ? 'Imagining the next picture...' : 'Reading your topic and choosing what matters...' });
+    log.innerHTML = lines.map((l) => `<li class="${l.cls}">${ICON[l.cls as 'ok' | 'fix' | 'wait']}<span>${l.html}</span></li>`).join('');
+    if (deckSource.status === 'ready') {
+      status.textContent = vrOK
+        ? `Your palace for "${deckSource.deck.title}" is ready.`
+        : `Your palace for "${deckSource.deck.title}" is ready. Preview it here, or open ${SITE} on a Meta Quest.`;
+    } else if (deckSource.status === 'error') {
+      status.textContent = `Smriti could not build that palace: ${deckSource.error} Try again, or pick a ready one.`;
+    } else status.textContent = '';
+  }, 250);
+
+  // Preview heads-up bar
+  const hud = document.createElement('div');
+  hud.id = 'smriti-hud';
+  hud.hidden = true;
+  hud.innerHTML = `<span><b>Preview on this computer.</b> Drag empty space to look around; drag pictures onto glowing rings. Arrow keys look too.</span><button type="button">Exit preview</button>`;
+  hud.querySelector('button')!.addEventListener('click', () => location.reload());
+
   status.textContent = 'Getting the room ready...';
   void navigator.xr
     ?.isSessionSupported('immersive-vr')
-    .then((ok) => (vrOK = ok))
-    .catch(() => (vrOK = false));
+    .then((ok) => {
+      vrOK = ok;
+      previewBtn.hidden = ok;
+    })
+    .catch(() => (previewBtn.hidden = false));
+  if (!navigator.xr) previewBtn.hidden = false;
+  void navigator.xr
+    ?.isSessionSupported('immersive-ar')
+    .then((ok) => {
+      arOK = ok;
+      ($<HTMLElement>('[data-pref="ownRoom"]')).hidden = !ok;
+    })
+    .catch(() => {});
+
+  refresh();
+  document.head.appendChild(style);
+  document.body.appendChild(root);
+  document.body.appendChild(hud);
+  document.getElementById('boot')?.remove();
+
   return {
     ready(w: World) {
       world = w;
       if (status.textContent === 'Getting the room ready...') status.textContent = '';
       w.visibilityState.subscribe((state) => {
-        root.style.display = state === VisibilityState.NonImmersive ? '' : 'none';
+        if (!preview.active) root.style.display = state === VisibilityState.NonImmersive ? '' : 'none';
       });
     },
     dispose() {
       window.clearInterval(timer);
       root.remove();
+      hud.remove();
       style.remove();
     },
   };
 }
-

@@ -27,6 +27,7 @@ import { deckSource } from './deck-source.js';
 import { OOP_DECK, type Deck, type MemoryCard } from './decks.js';
 import { animateKit, styleKit, type Styled } from './kit-style.js';
 import { loadPalace, nextReviewText, recordReview, savePlacement } from './palace-store.js';
+import { preview } from './preview.js';
 import { settings } from './settings.js';
 import { KITS } from './memory-kits.js';
 import { makeDiya, makeMarigold, makeSpotRing } from './memory-objects.js';
@@ -74,6 +75,7 @@ export class SmritiSystem extends createSystem({
   held: { required: [MemoryItem, Grabbed] },
   markers: { required: [SpotMarker] },
   pressed: { required: [AnswerOrb, Pressed] },
+  memPressed: { required: [MemoryItem, Pressed] },
 }) {
   private deck: Deck = OOP_DECK;
   private home = new Map<Entity, Vector3>();
@@ -117,6 +119,10 @@ export class SmritiSystem extends createSystem({
   private reveals = new Map<Entity, number>();
   private nextAt = -1;
   private nextAction: (() => void) | null = null;
+  // Mouse preview: the memory being dragged and how far in front of the camera it rides.
+  private carried: Entity | null = null;
+  private carryDist = 0.6;
+  private ray = new Vector3();
 
   init(): void {
     this.setupCaption();
@@ -126,7 +132,7 @@ export class SmritiSystem extends createSystem({
     this.cleanupFuncs.push(
       // Outside the headset only the room and the start panel show.
       this.world.visibilityState.subscribe((state) => {
-        const inXR = state !== VisibilityState.NonImmersive;
+        const inXR = state !== VisibilityState.NonImmersive || preview.active;
         this.diya.visible = inXR;
         for (const e of this.queries.items.entities) if (e.object3D) e.object3D.visible = inXR && !this.hidden.has(e);
         this.markersVisible = inXR;
@@ -141,6 +147,7 @@ export class SmritiSystem extends createSystem({
       this.queries.held.subscribe('qualify', (e) => this.onGrab(e)),
       this.queries.held.subscribe('disqualify', (e) => this.onRelease(e)),
       this.queries.pressed.subscribe('qualify', (e) => this.onOrbPressed(e)),
+      this.queries.memPressed.subscribe('qualify', (e) => this.startCarry(e)),
     );
   }
 
@@ -211,6 +218,7 @@ export class SmritiSystem extends createSystem({
       e.object3D!.scale.setScalar(this.trayScale);
       e.object3D!.lookAt(this.tmpA.set(0, home.y, 0.5));
       e.addComponent(OneHandGrabbable, { rotate: true, translate: true });
+      if (preview.active) e.addComponent(RayInteractable);
       e.addComponent(MemoryItem, { cardId: card.id, locus: '', phase: MemoryPhase.Tray });
       this.home.set(e, home);
       this.cards.set(e, card);
@@ -264,8 +272,7 @@ export class SmritiSystem extends createSystem({
 
   /** Pick the free spot the player aimed at (by direction from the head), or a very near one. */
   private pickLocus(objPos: Vector3, self: Entity): Locus | null {
-    this.player.head.updateWorldMatrix(true, false);
-    this.head.setFromMatrixPosition(this.player.head.matrixWorld);
+    this.viewPos(this.head);
     if (this.ownRoom) return this.makeOwnSpot(objPos, self);
     const aim = this.tmpA.copy(objPos).sub(this.head).normalize();
     let best: Locus | null = null;
@@ -331,9 +338,12 @@ export class SmritiSystem extends createSystem({
       this.savePalaceNow();
       this.say(
         `All ${total} memories are in your palace. Look around once and say them in your head.`,
-        'When you are ready, touch the orb in front of you.',
+        preview.active ? 'When you are ready, click the orb below.' : 'When you are ready, touch the orb in front of you.',
       );
       this.showOrbs(['', 'Test me', '']);
+    } else if (card && !this.ownRoom && f.locus !== card.suggested) {
+      // Placed somewhere other than Smriti's suggestion: the story names the wrong spot, so name the real one.
+      this.say(`${card.answer} lives at ${spot?.label ?? 'this spot'} now.`, `${total - count} left to place.`);
     } else if (card) {
       this.say(card.story.replace(/^On [^,]+, |^Under [^,]+, /, `At ${spot?.label ?? 'this spot'}, `), `${total - count} left to place.`);
     }
@@ -465,6 +475,56 @@ export class SmritiSystem extends createSystem({
     this.ownMarkers.delete(id);
   }
 
+  /** Where the person's eyes are: the headset, or the camera in mouse preview. */
+  private viewPos(out: Vector3): Vector3 {
+    if (preview.active) return this.world.camera.getWorldPosition(out);
+    this.player.head.updateWorldMatrix(true, false);
+    return out.setFromMatrixPosition(this.player.head.matrixWorld);
+  }
+
+  /** Words for the main gesture, so captions match how the person is playing. */
+  private get grabWord(): string {
+    return preview.active ? 'Click and drag' : 'Pinch';
+  }
+
+  /** Mouse preview: pressing a memory picks it up, as a pinch would. */
+  private startCarry(e: Entity): void {
+    if (!preview.active || this.carried || this.mode === 'recall') return;
+    if (e.getValue(MemoryItem, 'phase') === MemoryPhase.Flying) return;
+    const obj = e.object3D;
+    if (!obj) return;
+    this.world.camera.getWorldPosition(this.tmpA);
+    obj.getWorldPosition(this.tmpB);
+    this.carryDist = Math.min(0.9, Math.max(0.45, this.tmpA.distanceTo(this.tmpB)));
+    this.carried = e;
+    preview.carrying = true;
+    this.onGrab(e);
+  }
+
+  private updateCarry(): void {
+    const e = this.carried;
+    if (!e) return;
+    const obj = e.object3D;
+    if (!preview.down || !obj) {
+      this.carried = null;
+      preview.carrying = false;
+      this.onRelease(e);
+      return;
+    }
+    const cam = this.world.camera;
+    cam.getWorldPosition(this.tmpA);
+    this.ray.set(preview.ndcX, preview.ndcY, 0.5).unproject(cam).sub(this.tmpA).normalize();
+    obj.position.copy(this.tmpA).addScaledVector(this.ray, this.carryDist);
+  }
+
+  /** Mouse preview has started: show Smriti's things and begin, as entering the headset would. */
+  private beginPreview(): void {
+    this.diya.visible = true;
+    this.markersVisible = true;
+    for (const e of this.queries.items.entities) if (e.object3D) e.object3D.visible = !this.hidden.has(e);
+    this.begin();
+  }
+
   // -------------------------------------------------------------- tutorial
 
   /** First pinch: one marigold, one instruction, before any real content arrives. */
@@ -477,12 +537,15 @@ export class SmritiSystem extends createSystem({
     e.object3D!.position.copy(home);
     e.object3D!.scale.setScalar(2.2);
     e.addComponent(OneHandGrabbable, { rotate: true, translate: true });
+    if (preview.active) e.addComponent(RayInteractable);
     e.addComponent(MemoryItem, { cardId: TUTORIAL_ID, locus: '', phase: MemoryPhase.Tray });
     this.home.set(e, home);
     this.tutorial = e;
     this.say(
       'Hi, I am Smriti, the little lamp. This room will hold what you learn.',
-      'First, pinch the marigold in front of you with your thumb and finger.',
+      preview.active
+        ? 'First, click the marigold below and drag it onto a glowing ring.'
+        : 'First, pinch the marigold in front of you with your thumb and finger.',
     );
   }
 
@@ -527,7 +590,7 @@ export class SmritiSystem extends createSystem({
     const intro = failed
       ? `I could not finish your palace (${deckSource.error}), so let us start with ${this.deck.title}.`
       : this.deck.intro ?? `Here come your memories: ${this.deck.title}.`;
-    this.say(intro, 'Pinch a picture, move it toward a glowing ring, and let go.');
+    this.say(intro, `${this.grabWord} a picture toward a glowing ring, and let go.`);
   }
 
   // ---------------------------------------------------------------- recall
@@ -548,8 +611,7 @@ export class SmritiSystem extends createSystem({
 
   /** Float the orbs just within reach, in front of wherever the player's head is. */
   private showOrbs(values: string[]): void {
-    this.player.head.updateWorldMatrix(true, false);
-    this.head.setFromMatrixPosition(this.player.head.matrixWorld);
+    this.viewPos(this.head);
     const y = Math.min(1.35, Math.max(0.75, this.head.y - 0.3));
     for (const orb of this.orbs) {
       const slot = orb.entity.getValue(AnswerOrb, 'slot') as number;
@@ -633,7 +695,7 @@ export class SmritiSystem extends createSystem({
     while (options.length < 3) options.push('');
     this.showOrbs(options);
     this.awaiting = true;
-    this.say(`What did you leave at ${spot?.label ?? 'the glowing spot'}?`, 'Touch the right answer, or point and pinch.');
+    this.say(`What did you leave at ${spot?.label ?? 'the glowing spot'}?`, preview.active ? 'Click the right answer.' : 'Touch the right answer, or point and pinch.');
   }
 
   private onOrbPressed(orbEntity: Entity): void {
@@ -700,13 +762,15 @@ export class SmritiSystem extends createSystem({
     const after = this.secondTry.size > 0 ? ` After the weird remake, ${first + recovered} of ${total}.` : '';
     const streak = saved ? ` Streak: ${saved.streak} day${saved.streak === 1 ? '' : 's'}.` : '';
     const next = saved ? `${nextReviewText(saved)}. ` : '';
-    this.say(`You remembered ${first} of ${total}.${after}${streak}`, `${next}Touch the orb to test again.`);
+    this.say(`You remembered ${first} of ${total}.${after}${streak}`, `${next}${preview.active ? 'Click' : 'Touch'} the orb to test again.`);
     this.showOrbs(['', 'Test again', '']);
   }
 
   update(delta: number): void {
     this.elapsed += delta;
     const t = this.elapsed;
+    if (preview.active && !this.begun) this.beginPreview();
+    if (this.carried) this.updateCarry();
     if (this.nextAction && t >= this.nextAt) {
       const fn = this.nextAction;
       this.nextAction = null;

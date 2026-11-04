@@ -87,7 +87,10 @@ function agentUrl(): string {
 export async function buildFromTopic(topic: string): Promise<void> {
   Object.assign(deckSource, { status: 'building', topic, steps: [], error: '', review: null });
   bump();
+  // A newer choice (another topic or a ready palace) wins over this build.
+  const stale = () => deckSource.topic !== topic || deckSource.status !== 'building';
   const fail = (msg: string) => {
+    if (stale()) return;
     Object.assign(deckSource, { status: 'error', error: msg, deck: OOP_DECK });
     bump();
   };
@@ -110,6 +113,7 @@ export async function buildFromTopic(topic: string): Promise<void> {
         buffer = buffer.slice(nl + 1);
         if (!line) continue;
         const ev = JSON.parse(line) as { type: string; deck?: unknown; error?: string } & Partial<AgentStep>;
+        if (stale()) return;
         if (ev.type === 'step') {
           deckSource.steps.push({ tool: ev.tool ?? '', ok: ev.ok === true, note: ev.note ?? '' });
           bump();
