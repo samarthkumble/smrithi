@@ -132,6 +132,11 @@ export class SmritiSystem extends createSystem({
   private flare = 0;
   private trailClock = 0;
   private fxPos = new Vector3();
+  // Own room: the caption tags along with the view, since real-room memories can sit right in front of you.
+  private capTarget = new Vector3();
+  private capFwd = new Vector3();
+  private capRight = new Vector3();
+  private headQ = new Quaternion();
 
   init(): void {
     this.setupCaption();
@@ -516,6 +521,25 @@ export class SmritiSystem extends createSystem({
     this.ownMarkers.delete(id);
   }
 
+  /** Lazy follow: the caption drifts to stay a little right of where you look, about an arm's length away. */
+  private followCaption(delta: number): void {
+    const cap = this.world.getSceneObject('caption-panel');
+    if (!cap) return;
+    this.player.head.updateWorldMatrix(true, false);
+    this.head.setFromMatrixPosition(this.player.head.matrixWorld);
+    this.player.head.getWorldQuaternion(this.headQ);
+    this.capFwd.set(0, 0, -1).applyQuaternion(this.headQ);
+    this.capFwd.y = 0;
+    if (this.capFwd.lengthSq() < 1e-4) return;
+    this.capFwd.normalize();
+    this.capRight.set(-this.capFwd.z, 0, this.capFwd.x);
+    this.capTarget.copy(this.head).addScaledVector(this.capFwd, 0.85).addScaledVector(this.capRight, 0.3);
+    this.capTarget.y -= 0.12;
+    const k = Math.min(1, delta * (settings.calm ? 1.2 : 2.5));
+    cap.position.lerp(this.capTarget, k);
+    cap.lookAt(this.head);
+  }
+
   /** Where the person's eyes are: the headset, or the camera in mouse preview. */
   private viewPos(out: Vector3): Vector3 {
     if (preview.active) return this.world.camera.getWorldPosition(out);
@@ -586,7 +610,9 @@ export class SmritiSystem extends createSystem({
       'Hi, I am Smriti, the little lamp. I turn what you learn into pictures. You place them around this room, then I test you.',
       preview.active
         ? 'First, click the marigold below and drag it onto a glowing ring.'
-        : 'First, pinch the marigold in front of you with your thumb and finger.',
+        : this.ownRoom
+          ? 'First, pinch the marigold in front of you and set it down anywhere in your room.'
+          : 'First, pinch the marigold in front of you with your thumb and finger.',
     );
   }
 
@@ -631,7 +657,12 @@ export class SmritiSystem extends createSystem({
     const intro = failed
       ? `I could not finish your palace (${deckSource.error}), so let us start with ${this.deck.title}.`
       : this.deck.intro ?? `Here come your memories: ${this.deck.title}.`;
-    this.say(intro, `${this.grabWord} a picture toward a glowing ring, and let go.`);
+    this.say(
+      intro,
+      this.ownRoom
+        ? `${this.grabWord} a picture and leave it anywhere in your room: a desk, a shelf, a doorway.`
+        : `${this.grabWord} a picture toward a glowing ring, and let go.`,
+    );
   }
 
   /** Swap a memory's picture for the agent's new one, keep it in the deck, and celebrate the change. */
@@ -863,6 +894,7 @@ export class SmritiSystem extends createSystem({
     const t = this.elapsed;
     if (preview.active && !this.begun) this.beginPreview();
     if (this.carried) this.updateCarry();
+    if (this.ownRoom) this.followCaption(delta);
     if (this.nextAction && t >= this.nextAt) {
       const fn = this.nextAction;
       this.nextAction = null;
