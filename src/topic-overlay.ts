@@ -150,6 +150,7 @@ export function mountTopicOverlay(): {
   refresh();
   document.head.appendChild(style);
   document.body.appendChild(root);
+  document.getElementById('boot')?.remove();
   status.textContent = 'Getting the room ready...';
   void navigator.xr
     ?.isSessionSupported('immersive-vr')
