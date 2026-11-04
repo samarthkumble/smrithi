@@ -48,8 +48,9 @@ const KITS: Record<string, string> = {
 const COLORS = ['natural', 'red', 'blue', 'green', 'gold', 'purple', 'pink', 'white', 'black'];
 const MODIFIERS = ['none', 'giant', 'tiny', 'glowing', 'spinning', 'bouncing', 'on_fire', 'floating'];
 
-// Tried in order; a busy or failing model falls through to the next one.
-const MODELS = [process.env.GEMINI_MODEL || 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'].filter(
+// Tried in order, fastest first: Flash-Lite answers in seconds and has handled every palace well;
+// the larger Flash models are the fallback when it is busy. GEMINI_MODEL overrides the first choice.
+const MODELS = [process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'].filter(
   (m, i, all) => all.indexOf(m) === i,
 );
 const MODEL = MODELS[0];
@@ -263,13 +264,15 @@ interface CallSetup {
   system: string;
   tools: unknown[];
   timeoutMs?: number;
+  /** One attempt per model, no pause: for calls a person is waiting on mid-session. */
+  quick?: boolean;
 }
 const BUILD: CallSetup = { system: SYSTEM, tools: TOOLS };
 
 async function callGemini(key: string, contents: Content[], state: { model: number }, setup: CallSetup = BUILD): Promise<Content> {
   let lastError: unknown;
   for (; state.model < MODELS.length; state.model++) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < (setup.quick ? 1 : 2); attempt++) {
       try {
         return await callModel(MODELS[state.model], key, contents, setup);
       } catch (err) {
@@ -440,7 +443,7 @@ async function reimagine(key: string, body: Record<string, unknown>): Promise<Re
     },
   ];
   const state = { model: 0 };
-  const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, timeoutMs: 9000 };
+  const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, timeoutMs: 6000, quick: true };
   try {
     for (let turn = 0; turn < 3; turn++) {
       const reply = await callGemini(key, contents, state, setup);
