@@ -2,6 +2,7 @@
  * Start screen (2D only): type what you want to remember, or pick a ready deck,
  * then enter. Typing happens here because the headset keyboard works in 2D pages.
  */
+import { SessionMode, VisibilityState, type World } from '@iwsdk/core';
 import { buildFromTopic, deckSource, startReview, usePreset } from './deck-source.js';
 import { loadPalace, nextReviewText } from './palace-store.js';
 import { saveSettings, settings, type Settings } from './settings.js';
@@ -27,14 +28,37 @@ const CSS = `
 #smriti-start .back button{margin-left:auto;flex:none}
 #smriti-start .prefs{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:13px;color:#CDBB9E}
 #smriti-start .prefs label{display:flex;gap:6px;align-items:center;cursor:pointer}
+#smriti-start .prefs label[hidden]{display:none}
 #smriti-start .prefs input{accent-color:#E3A21A;width:16px;height:16px}
 #smriti-start .status{margin-top:8px;min-height:20px;color:#CDBB9E;font-size:13px}
 `;
 
-export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: (ownRoom: boolean) => void }): {
-  setVisible(v: boolean): void;
+const SITE = 'smrithi-eight.vercel.app';
+const NO_HEADSET = `Smriti is a VR experience. Open ${SITE} in the browser on a Meta Quest to step inside.`;
+
+/**
+ * Mounted before the 3D world finishes loading, so the page is never blank.
+ * ready() is called once the world exists; until then, Enter explains it is loading.
+ */
+export function mountTopicOverlay(): {
+  ready(world: World): void;
   dispose(): void;
 } {
+  let world: World | null = null;
+  let vrOK = false;
+  /** Returns true if the session was started; otherwise explains why not in the status line. */
+  const tryEnter = (ownRoom: boolean): boolean => {
+    if (!world) {
+      status.textContent = 'Still getting the room ready, one moment...';
+      return false;
+    }
+    if (!vrOK || !world.xrEnabled) {
+      status.textContent = NO_HEADSET;
+      return false;
+    }
+    world.launchXR({ sessionMode: ownRoom ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR });
+    return true;
+  };
   const style = document.createElement('style');
   style.textContent = CSS;
   const root = document.createElement('section');
@@ -77,8 +101,7 @@ export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: (ownRoom
     back.querySelector('small')!.textContent = `${saved.deck.title}${where} · ${nextReviewText(saved)}${streak}`;
     back.querySelector('button')!.addEventListener('click', () => {
       startReview(saved);
-      if (opts.canEnterXR) opts.enterXR(saved.room === 'own' && arOK);
-      else status.textContent = 'Open this page on a Meta Quest to step inside.';
+      tryEnter(saved.room === 'own' && arOK);
     });
     root.insertBefore(back, root.querySelector('h2'));
   }
@@ -104,15 +127,14 @@ export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: (ownRoom
     const typed = text.value.trim().length >= 3;
     for (const c of chips) c.b.setAttribute('aria-pressed', String(!typed && c.d === preset));
     go.textContent = typed ? 'Build my palace' : 'Enter Smriti';
-    status.textContent = opts.canEnterXR ? '' : 'Open this page on a Meta Quest to step inside.';
+
   };
   text.addEventListener('input', refresh);
   go.addEventListener('click', () => {
     const typed = text.value.trim();
     if (typed.length >= 3) void buildFromTopic(typed);
     else usePreset(preset);
-    if (opts.canEnterXR) opts.enterXR(settings.ownRoom && arOK);
-    else status.textContent = typed.length >= 3 ? 'Building... (step inside on a Quest to place them)' : status.textContent;
+    tryEnter(settings.ownRoom && arOK);
   });
   // Live progress while the agent builds (also useful if the person is still in 2D).
   let seen = -1;
@@ -121,15 +143,25 @@ export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: (ownRoom
     seen = deckSource.version;
     const made = deckSource.steps.filter((st) => st.ok && st.tool === 'create_image').length;
     if (deckSource.status === 'building') status.textContent = made ? `Smriti is imagining... ${made} images so far` : 'Smriti is choosing what to remember...';
-    else if (deckSource.status === 'ready') status.textContent = `Ready: ${deckSource.deck.cards.length} memories for "${deckSource.deck.title}".`;
+    else if (deckSource.status === 'ready')
+      status.textContent = `Ready: ${deckSource.deck.cards.length} memories for "${deckSource.deck.title}".${vrOK ? '' : ' Open this link on a Meta Quest to place them.'}`;
     else status.textContent = `Could not build it: ${deckSource.error}`;
   }, 300);
   refresh();
   document.head.appendChild(style);
   document.body.appendChild(root);
+  status.textContent = 'Getting the room ready...';
+  void navigator.xr
+    ?.isSessionSupported('immersive-vr')
+    .then((ok) => (vrOK = ok))
+    .catch(() => (vrOK = false));
   return {
-    setVisible(v: boolean) {
-      root.style.display = v ? '' : 'none';
+    ready(w: World) {
+      world = w;
+      if (status.textContent === 'Getting the room ready...') status.textContent = '';
+      w.visibilityState.subscribe((state) => {
+        root.style.display = state === VisibilityState.NonImmersive ? '' : 'none';
+      });
     },
     dispose() {
       window.clearInterval(timer);
