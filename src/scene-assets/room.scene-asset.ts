@@ -25,6 +25,7 @@ import {
   TorusGeometry,
   Vector2,
 } from '@iwsdk/core';
+import { mergeStatic } from './lib/merge-static.js';
 import { ROOM } from '../palace-layout.js';
 import { bevelBox } from './lib/hardsurface.js';
 
@@ -525,6 +526,8 @@ export function createPalaceRoom(): Group {
       (o as Mesh).receiveShadow = false;
     }
   });
+  // Animated flames stay separate; everything else static is fused by material.
+  mergeStatic(root, (mesh) => mesh.name.includes('Flame'));
   return root;
 }
 

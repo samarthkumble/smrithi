@@ -3,6 +3,7 @@
  * Returns a wrapper whose child "Pivot" carries the animated part, so effects never
  * fight the placement transform.
  */
+import { mergeStatic } from './scene-assets/lib/merge-static.js';
 import { settings } from './settings.js';
 import { Box3, ConeGeometry, Group, Mesh, MeshStandardMaterial, type Object3D, Vector3 } from '@iwsdk/core';
 
@@ -63,6 +64,12 @@ export function styleKit(kit: Object3D, color: string, modifier: string): Styled
       cloned.set(mat, c);
     }
     mesh.material = c;
+  });
+  // Fewer draw calls: fuse each kit's static parts by material (shape-changing forms stay separate).
+  const forms = new Set((kit.userData.morphForms as string[] | undefined) ?? []);
+  mergeStatic(kit, (mesh) => {
+    for (let o: Object3D | null = mesh; o && o !== kit; o = o.parent) if (forms.has(o.name)) return true;
+    return false;
   });
   const flames: Mesh[] = [];
   if (mod === 'on_fire') {

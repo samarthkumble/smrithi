@@ -15,6 +15,10 @@ export interface SavedPalace {
   nextReviewAt: number;
   streak: number;
   lastReviewDay: string;
+  /** Where the palace lives: Smriti's crafted room, or the person's own room (passthrough). */
+  room?: 'crafted' | 'own';
+  /** Own room only: where each memory was left, relative to where the person sat. */
+  anchors?: Record<string, [number, number, number]>;
 }
 
 const KEY = 'smriti.palace';
@@ -44,12 +48,17 @@ function store(p: SavedPalace): void {
 }
 
 /** Called once every memory is on a spot; keeps history if it is the same deck. */
-export function savePlacement(deck: Deck, placed: Record<string, string>, weird: string[]): SavedPalace {
+export function savePlacement(
+  deck: Deck,
+  placed: Record<string, string>,
+  weird: string[],
+  where: Pick<SavedPalace, 'room' | 'anchors'> = { room: 'crafted' },
+): SavedPalace {
   const old = loadPalace();
-  const same = old && old.deck.id === deck.id && old.deck.title === deck.title;
+  const same = old && old.deck.id === deck.id && old.deck.title === deck.title && (old.room ?? 'crafted') === where.room;
   const p: SavedPalace = same
-    ? { ...old, deck, placed, weird }
-    : { deck, placed, weird, reviews: [], level: 0, nextReviewAt: Date.now() + DAY, streak: old?.streak ?? 0, lastReviewDay: old?.lastReviewDay ?? '' };
+    ? { ...old, deck, placed, weird, ...where }
+    : { deck, placed, weird, ...where, reviews: [], level: 0, nextReviewAt: Date.now() + DAY, streak: old?.streak ?? 0, lastReviewDay: old?.lastReviewDay ?? '' };
   store(p);
   return p;
 }

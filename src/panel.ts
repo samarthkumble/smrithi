@@ -1,4 +1,4 @@
-import { createSystem, type UIKitMLAsset, VisibilityState } from '@iwsdk/core';
+import { createSystem, SessionMode, type UIKitMLAsset, VisibilityState } from '@iwsdk/core';
 import { mountTopicOverlay } from './topic-overlay.js';
 
 /** Start panel: "Enter Smriti" in the browser; hidden once inside XR. */
@@ -8,7 +8,10 @@ export class PanelSystem extends createSystem({}) {
     const xrButton = panelObj?.getElementById('xr-button');
     const exitButton = panelObj?.getElementById('exit-button');
     if (!panelObj || xrButton == null || exitButton == null) return;
-    const overlay = mountTopicOverlay({ canEnterXR: this.world.xrEnabled, enterXR: () => this.world.launchXR() });
+    const overlay = mountTopicOverlay({
+      canEnterXR: this.world.xrEnabled,
+      enterXR: (ownRoom) => this.world.launchXR({ sessionMode: ownRoom ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR }),
+    });
     this.cleanupFuncs.push(() => overlay.dispose());
     if (!this.world.xrEnabled) {
       xrButton.setProperties({ display: 'none' });

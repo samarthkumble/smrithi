@@ -31,7 +31,7 @@ const CSS = `
 #smriti-start .status{margin-top:8px;min-height:20px;color:#CDBB9E;font-size:13px}
 `;
 
-export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: () => void }): {
+export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: (ownRoom: boolean) => void }): {
   setVisible(v: boolean): void;
   dispose(): void;
 } {
@@ -52,7 +52,13 @@ export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: () => vo
       <label><input type="checkbox" data-pref="largeText">Larger captions</label>
       <label><input type="checkbox" data-pref="calm">Calm motion</label>
       <label><input type="checkbox" data-pref="sound">Sounds</label>
+      <label class="own" hidden><input type="checkbox" data-pref="ownRoom">Use my own room (passthrough)</label>
     </div>`;
+  let arOK = false;
+  void navigator.xr?.isSessionSupported('immersive-ar').then((ok) => {
+    arOK = ok;
+    (root.querySelector('.own') as HTMLElement).hidden = !ok;
+  }).catch(() => {});
   for (const box of root.querySelectorAll<HTMLInputElement>('input[data-pref]')) {
     const key = box.dataset.pref as keyof Settings;
     box.checked = settings[key];
@@ -67,10 +73,11 @@ export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: () => vo
     back.className = 'back';
     const streak = saved.streak > 0 ? ` · ${saved.streak}-day streak` : '';
     back.innerHTML = `<div><b>Welcome back.</b> Your palace is waiting.<small></small></div><button class="go" type="button">Review my palace</button>`;
-    back.querySelector('small')!.textContent = `${saved.deck.title} · ${nextReviewText(saved)}${streak}`;
+    const where = saved.room === 'own' ? ' · in your own room' : '';
+    back.querySelector('small')!.textContent = `${saved.deck.title}${where} · ${nextReviewText(saved)}${streak}`;
     back.querySelector('button')!.addEventListener('click', () => {
       startReview(saved);
-      if (opts.canEnterXR) opts.enterXR();
+      if (opts.canEnterXR) opts.enterXR(saved.room === 'own' && arOK);
       else status.textContent = 'Open this page on a Meta Quest to step inside.';
     });
     root.insertBefore(back, root.querySelector('h2'));
@@ -104,7 +111,7 @@ export function mountTopicOverlay(opts: { canEnterXR: boolean; enterXR: () => vo
     const typed = text.value.trim();
     if (typed.length >= 3) void buildFromTopic(typed);
     else usePreset(preset);
-    if (opts.canEnterXR) opts.enterXR();
+    if (opts.canEnterXR) opts.enterXR(settings.ownRoom && arOK);
     else status.textContent = typed.length >= 3 ? 'Building... (step inside on a Quest to place them)' : status.textContent;
   });
   // Live progress while the agent builds (also useful if the person is still in 2D).

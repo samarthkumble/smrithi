@@ -37,11 +37,17 @@ const SNAP_ANGLE = (30 * Math.PI) / 180; // forgiving "magnetic" aim
 const SNAP_NEAR = 0.4; // released this close to a spot -> snap regardless of aim
 const FLIGHT_TIME = 0.55;
 /** Memories grow on their spot so far ones still read clearly from the chair. */
+/** "Use my own room": spots made where the person lets go (id own0, own1...). */
+const ownSpots = new Map<string, Locus>();
+const findLocus = (id: string): Locus | undefined => ownSpots.get(id) ?? LOCI.find((l) => l.id === id);
+
 function placedScale(locusId: string): number {
-  const l = LOCI.find((x) => x.id === locusId);
+  const l = findLocus(locusId);
   if (!l) return 1;
   const [x, y, z] = l.anchor;
   const d = Math.hypot(x, y - 1.2, z);
+  // Own-room spots can be within arm's reach, so they grow less.
+  if (ownSpots.has(locusId)) return Math.min(2.2, Math.max(1, 0.9 + 0.5 * d));
   return Math.min(2.8, Math.max(1.6, 1.25 + 0.6 * d));
 }
 
@@ -95,6 +101,9 @@ export class SmritiSystem extends createSystem({
   /** Memories wait smaller on the tray when the deck is big. */
   private trayScale = 1;
   private begun = false;
+  /** True in a passthrough session: the crafted room hides and spots are wherever you let go. */
+  private ownRoom = false;
+  private ownMarkers = new Map<string, Entity>();
   private orbs: Orb[] = [];
   private queue: Entity[] = [];
   private current: Entity | null = null;
@@ -121,6 +130,12 @@ export class SmritiSystem extends createSystem({
         this.diya.visible = inXR;
         for (const e of this.queries.items.entities) if (e.object3D) e.object3D.visible = inXR && !this.hidden.has(e);
         this.markersVisible = inXR;
+        if (!inXR && this.ownRoom) {
+          // Back in the browser: show Smriti's room again behind the start screen.
+          const room = this.world.getSceneObject('palace-room');
+          if (room) room.visible = true;
+          this.world.renderer.setClearAlpha(1);
+        }
         if (inXR && !this.begun) this.begin();
       }),
       this.queries.held.subscribe('qualify', (e) => this.onGrab(e)),
@@ -221,6 +236,11 @@ export class SmritiSystem extends createSystem({
     }
     this.flights.delete(e);
     this.reveals.delete(e);
+    const oldSpot = e.getValue(MemoryItem, 'locus') as string;
+    if (ownSpots.has(oldSpot)) {
+      this.freeLocus(e);
+      this.dropOwnSpot(oldSpot);
+    }
     e.object3D?.scale.setScalar(this.trayScale);
     this.styled.get(e)?.pivot.scale.setScalar(1);
     this.freeLocus(e);
@@ -233,6 +253,10 @@ export class SmritiSystem extends createSystem({
     }
     const card = this.cards.get(e);
     if (card) {
+      if (this.ownRoom) {
+        this.say(`${card.answer}.`, 'Leave it anywhere in your room: on a desk, a shelf, by a door. Just let go.');
+        return;
+      }
       const spot = LOCI.find((l) => l.id === card.suggested);
       this.say(`${card.answer}.`, spot ? `Smriti suggests ${spot.label}. Move it there and let go.` : '');
     }
@@ -242,6 +266,7 @@ export class SmritiSystem extends createSystem({
   private pickLocus(objPos: Vector3, self: Entity): Locus | null {
     this.player.head.updateWorldMatrix(true, false);
     this.head.setFromMatrixPosition(this.player.head.matrixWorld);
+    if (this.ownRoom) return this.makeOwnSpot(objPos, self);
     const aim = this.tmpA.copy(objPos).sub(this.head).normalize();
     let best: Locus | null = null;
     let bestAngle = SNAP_ANGLE;
@@ -275,7 +300,8 @@ export class SmritiSystem extends createSystem({
       const home = this.home.get(e)!;
       e.setValue(MemoryItem, 'phase', MemoryPhase.Flying);
       this.flights.set(e, { from, to: home.clone(), t: 0, locus: '' });
-      this.say('Point it toward a glowing spot, then let go.', 'It flies to the spot you aim at.');
+      if (this.ownRoom) this.say('That is too close to another memory.', 'Leave it a little further away, then let go.');
+      else this.say('Point it toward a glowing spot, then let go.', 'It flies to the spot you aim at.');
     }
   }
 
@@ -299,7 +325,7 @@ export class SmritiSystem extends createSystem({
       if (it !== this.tutorial && it.getValue(MemoryItem, 'phase') === MemoryPhase.Placed) count++;
     }
     const total = this.deck.cards.length;
-    const spot = LOCI.find((l) => l.id === f.locus);
+    const spot = findLocus(f.locus);
     if (count >= total) {
       this.mode = 'ready';
       this.savePalaceNow();
@@ -318,6 +344,15 @@ export class SmritiSystem extends createSystem({
   /** First entry into the headset: review a saved palace, or start a new one. */
   private begin(): void {
     this.begun = true;
+    const blend = this.world.renderer.xr.getEnvironmentBlendMode?.();
+    this.ownRoom = blend === 'alpha-blend' || blend === 'additive';
+    if (this.ownRoom) {
+      const room = this.world.getSceneObject('palace-room');
+      if (room) room.visible = false;
+      const motes = this.world.scene.getObjectByName('DustMotes');
+      if (motes) motes.visible = false;
+      this.world.renderer.setClearAlpha(0);
+    }
     const caption = this.world.getSceneObject('caption-panel');
     if (caption && settings.largeText) caption.scale.multiplyScalar(1.35);
     if (deckSource.review) {
@@ -344,10 +379,19 @@ export class SmritiSystem extends createSystem({
   /** Put every saved memory back on its spot, then walk the palace with a test. */
   private restoreReview(): void {
     const saved = deckSource.review!;
+    if (this.ownRoom && saved.anchors) {
+      for (const [cardId, anchor] of Object.entries(saved.anchors)) {
+        const id = saved.placed[cardId];
+        if (!id || ownSpots.has(id)) continue;
+        const spot = { id: id as Locus['id'], label: this.describeSpot(anchor), anchor };
+        ownSpots.set(id, spot);
+        this.addOwnMarker(spot);
+      }
+    }
     this.spawnDeck();
     for (const e of this.queries.items.entities) {
       const card = this.cards.get(e);
-      const locus = card ? LOCI.find((l) => l.id === saved.placed[card.id]) : undefined;
+      const locus = card ? findLocus(saved.placed[card.id]) : undefined;
       if (!card || !locus || this.occupant.has(locus.id)) continue;
       this.occupant.set(locus.id, e);
       e.setValue(MemoryItem, 'locus', locus.id);
@@ -367,13 +411,58 @@ export class SmritiSystem extends createSystem({
 
   private savePalaceNow(): void {
     const placed: Record<string, string> = {};
+    const anchors: Record<string, [number, number, number]> = {};
     const weird: string[] = [];
     for (const [e, card] of this.cards) {
       const locus = e.getValue(MemoryItem, 'locus') as string;
       if (locus) placed[card.id] = locus;
+      const own = ownSpots.get(locus);
+      if (own) anchors[card.id] = own.anchor;
       if (this.weird.has(e)) weird.push(card.id);
     }
-    savePlacement(this.deck, placed, weird);
+    savePlacement(this.deck, placed, weird, this.ownRoom ? { room: 'own', anchors } : { room: 'crafted' });
+  }
+
+  /** Own room: the spot is exactly where it was released (not too close to another one). */
+  private makeOwnSpot(pos: Vector3, self: Entity): Locus | null {
+    for (const [id, spot] of ownSpots) {
+      const holder = this.occupant.get(id);
+      if (holder && holder !== self && this.tmpB.set(...spot.anchor).distanceTo(pos) < 0.22) return null;
+    }
+    let n = 0;
+    while (ownSpots.has(`own${n}`)) n++;
+    const id = `own${n}`;
+    const anchor: [number, number, number] = [pos.x, Math.max(0.03, pos.y), pos.z];
+    const spot = { id: id as Locus['id'], label: this.describeSpot(anchor), anchor };
+    ownSpots.set(id, spot);
+    this.addOwnMarker(spot);
+    return spot;
+  }
+
+  /** "the spot on your left, up high": words for a spot relative to the start pose. */
+  private describeSpot([x, y, z]: [number, number, number]): string {
+    const ang = (Math.atan2(x, -z) * 180) / Math.PI;
+    const side = Math.abs(ang) < 35 ? 'in front of you' : Math.abs(ang) > 135 ? 'behind you' : ang < 0 ? 'on your left' : 'on your right';
+    const height = y < 0.45 ? ', down low' : y > 1.45 ? ', up high' : '';
+    let label = `the spot ${side}${height}`;
+    let k = 2;
+    const base = label;
+    while ([...ownSpots.values()].some((sp) => sp.label === label)) label = `${base} (${k++})`;
+    return label;
+  }
+
+  private addOwnMarker(spot: Locus): void {
+    const ring = makeSpotRing();
+    const e = this.world.createTransformEntity(ring);
+    e.addComponent(SpotMarker, { locus: spot.id });
+    e.object3D!.position.set(spot.anchor[0], spot.anchor[1] + 0.006, spot.anchor[2]);
+    this.ownMarkers.set(spot.id, e);
+  }
+
+  private dropOwnSpot(id: string): void {
+    ownSpots.delete(id);
+    this.ownMarkers.get(id)?.dispose();
+    this.ownMarkers.delete(id);
   }
 
   // -------------------------------------------------------------- tutorial
@@ -404,7 +493,9 @@ export class SmritiSystem extends createSystem({
       /* ignore */
     }
     this.later(1.2, () => {
+      const tutorialSpot = e.getValue(MemoryItem, 'locus') as string;
       this.freeLocus(e);
+      if (ownSpots.has(tutorialSpot)) this.dropOwnSpot(tutorialSpot);
       this.home.delete(e);
       this.tutorial = null;
       e.dispose();
@@ -499,7 +590,10 @@ export class SmritiSystem extends createSystem({
     this.firstTry.clear();
     this.secondTry.clear();
     this.hideOrbs();
-    const order = (e: Entity) => LOCI.findIndex((l) => l.id === e.getValue(MemoryItem, 'locus'));
+    const order = (e: Entity) => {
+      const id = e.getValue(MemoryItem, 'locus') as string;
+      return ownSpots.has(id) ? 100 + Number(id.slice(3)) : LOCI.findIndex((l) => l.id === id);
+    };
     this.queue = [...this.queries.items.entities]
       .filter((e) => e.getValue(MemoryItem, 'phase') === MemoryPhase.Placed)
       .sort((a, b) => order(a) - order(b));
@@ -531,7 +625,7 @@ export class SmritiSystem extends createSystem({
     const card = this.cards.get(e)!;
     this.current = e;
     this.askLocus = e.getValue(MemoryItem, 'locus') as string;
-    const spot = LOCI.find((l) => l.id === this.askLocus);
+    const spot = findLocus(this.askLocus);
     const others = this.deck.cards.filter((c) => c.id !== card.id).map((c) => c.answer);
     shuffle(others);
     const options = [card.answer, others[0], others[1]].filter(Boolean) as string[];
@@ -691,7 +785,7 @@ export class SmritiSystem extends createSystem({
       const obj = m.object3D;
       if (!obj) continue;
       const asked = this.askLocus !== '' && id === this.askLocus;
-      obj.visible = this.markersVisible && (this.mode === 'recall' ? asked : !this.occupant.has(id));
+      obj.visible = this.markersVisible && (this.mode === 'recall' ? asked : !this.ownRoom && !this.occupant.has(id));
       const s = (asked ? 1.5 : 1) + Math.sin(t * (asked ? 5 : 3) + id.length) * (asked ? 0.15 : 0.08);
       obj.scale.set(s, s, s);
     }

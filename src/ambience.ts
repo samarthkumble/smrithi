@@ -1,6 +1,7 @@
 /**
  * Small touches of life: dust drifting in the window light and the brass
- * lamp's flames flickering. No per-frame allocation.
+ * lamp's flames flickering, and a quiet tanpura drone inside the headset.
+ * No per-frame allocation.
  */
 import {
   AdditiveBlending,
@@ -10,7 +11,10 @@ import {
   type Object3D,
   Points,
   PointsMaterial,
+  VisibilityState,
 } from '@iwsdk/core';
+import { settings } from './settings.js';
+import { Tanpura } from './tanpura.js';
 
 const MOTES = 70;
 
@@ -20,6 +24,7 @@ export class AmbienceSystem extends createSystem({}) {
   private attr!: BufferAttribute;
   private flames: Object3D[] = [];
   private t = 0;
+  private tanpura = new Tanpura();
 
   init(): void {
     this.pos = new Float32Array(MOTES * 3);
@@ -42,6 +47,13 @@ export class AmbienceSystem extends createSystem({}) {
     room?.traverse((o) => {
       if (o.name === 'LampFlame') this.flames.push(o);
     });
+    this.cleanupFuncs.push(
+      this.world.visibilityState.subscribe((state) => {
+        if (state === VisibilityState.NonImmersive) this.tanpura.stop();
+        else if (settings.sound) this.tanpura.start();
+      }),
+      () => this.tanpura.stop(),
+    );
   }
 
   /** Motes live in the slanted beam between the window and the floor. */
@@ -54,6 +66,7 @@ export class AmbienceSystem extends createSystem({}) {
 
   update(delta: number): void {
     this.t += delta;
+    this.tanpura.tick();
     for (let i = 0; i < MOTES; i++) this.place(i, this.seed[i]);
     this.attr.needsUpdate = true;
     for (let i = 0; i < this.flames.length; i++) {

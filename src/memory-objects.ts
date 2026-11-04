@@ -22,6 +22,7 @@ import {
   Vector2,
   Vector3,
 } from '@iwsdk/core';
+import { mergeStatic } from './scene-assets/lib/merge-static.js';
 
 const std = (color: string, roughness = 0.6, emissive?: string, ei = 0) =>
   new MeshStandardMaterial({ color, roughness, metalness: 0, emissive: emissive ?? '#000000', emissiveIntensity: ei });
@@ -228,6 +229,7 @@ export function makeMarigold(): Group {
     }
   });
   head.add(petals);
+  mergeStatic(root, () => false);
   return root;
 }
 
