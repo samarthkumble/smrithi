@@ -20,3 +20,8 @@ export const AnswerOrb = createComponent('AnswerOrb', {
   slot: { type: Types.Int8, default: 0 },
   label: { type: Types.String, default: '' },
 });
+
+/** A button on the palm-up menu: 'repeat', 'voice' or 'exit'. */
+export const PalmButton = createComponent('PalmButton', {
+  action: { type: Types.String, default: '' },
+});

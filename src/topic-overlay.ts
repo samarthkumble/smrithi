@@ -31,9 +31,27 @@ const DECK_ICON: Record<string, string> = {
   'oop-pillars': '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M16 4l9 6v12l-9 6-9-6V10z"/><path d="M7 10l9 6 9-6M16 16v12"/></svg>',
   acid: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="14" width="18" height="13" rx="2.5"/><path d="M11 14V10a5 5 0 0 1 10 0v4M16 19v3"/></svg>',
   planets: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="16" cy="16" r="7"/><ellipse cx="16" cy="16" rx="14" ry="4.5" transform="rotate(-20 16 16)"/></svg>',
+  osi: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 9l11-5 11 5-11 5zM5 16l11 5 11-5M5 23l11 5 11-5"/></svg>',
+  mughals: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 27h20M8 27V15a8 8 0 0 1 16 0v12M16 3v4M13 27v-6a3 3 0 0 1 6 0v6"/></svg>',
+  'fundamental-rights': '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 5v22M8 27h16M6 11h20M6 11l-3 8h6zM26 11l-3 8h6z"/></svg>',
+  elements: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="6" width="20" height="20" rx="3"/><path d="M12 12v8M12 16h6M18 12v8" stroke-linecap="round"/></svg>',
+  newton: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="16" cy="18" r="8"/><path d="M16 10c0-3 2-5 5-5M16 10c-1-2-3-3-5-3"/></svg>',
+  spanish: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 7h22v14H14l-6 5v-5H5z"/><path d="M11 14h10" stroke-linecap="round"/></svg>',
 };
 
-const shortTitle = (d: Deck) => d.title.replace(' of transactions', '').replace(', in order from the Sun', '');
+const SHORT: Record<string, string> = {
+  'oop-pillars': '4 pillars of OOP',
+  osi: 'OSI model layers',
+  planets: 'The planets',
+  acid: 'ACID properties',
+  mughals: 'Mughal emperors',
+  'fundamental-rights': 'Fundamental Rights',
+  elements: 'First 8 elements',
+  newton: "Newton's laws",
+  spanish: 'Spanish greetings',
+};
+
+const shortTitle = (d: Deck) => SHORT[d.id] ?? d.title;
 const words = (id: string) => id.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/TV/, ' TV').toLowerCase().replace(/ tv/, ' TV').trim();
 const spotName = (id: string) => LOCI.find((l) => l.id === id)?.label ?? id;
 
@@ -65,6 +83,8 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
   let vrOK = false;
   let arOK = false;
   let preset: Deck = deckSource.deck;
+  /** A headset session or preview has started in this page load. */
+  let entered = false;
 
   const style = document.createElement('style');
   style.textContent = START_CSS;
@@ -137,6 +157,21 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
     $<HTMLElement>('.decks').appendChild(b);
     return { b, d };
   });
+  // Three ready palaces at a glance; the rest one tap away.
+  const moreBtn = document.createElement('button');
+  moreBtn.type = 'button';
+  moreBtn.className = 'more';
+  const extra = deckButtons.slice(3);
+  const setMore = (open: boolean) => {
+    for (const x of extra) x.b.hidden = !open;
+    moreBtn.textContent = open ? 'Fewer palaces' : `More palaces (${extra.length})`;
+    moreBtn.setAttribute('aria-expanded', String(open));
+  };
+  moreBtn.addEventListener('click', () => setMore(moreBtn.getAttribute('aria-expanded') !== 'true'));
+  if (extra.length) {
+    setMore(false);
+    $<HTMLElement>('.decks').after(moreBtn);
+  }
 
   // Comfort switches
   for (const p of PREFS) {
@@ -152,6 +187,8 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
       settings[p.key] = !settings[p.key];
       b.setAttribute('aria-checked', String(settings[p.key]));
       saveSettings();
+      // A session already ran in this page in the other mode: start clean so the room matches.
+      if (p.key === 'ownRoom' && entered) location.reload();
     });
     prefsBox.appendChild(b);
   }
@@ -283,6 +320,7 @@ export function mountTopicOverlay(): { ready(world: World): void; dispose(): voi
       return;
     }
     if (vrOK && world.xrEnabled) {
+      entered = true;
       world.launchXR({ sessionMode: ownRoom ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR });
       return;
     }

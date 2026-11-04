@@ -5,6 +5,7 @@ import '@fontsource/tiro-devanagari-sanskrit/400.css';
 import { World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
 import { AmbienceSystem } from './ambience.js';
+import { PalmMenuSystem } from './palm-menu-system.js';
 import { PanelSystem } from './panel.js';
 import { PreviewSystem } from './preview-system.js';
 import { SmritiSystem } from './smriti-system.js';
@@ -18,5 +19,6 @@ World.create(document.getElementById('scene-container') as HTMLDivElement, proje
   world.registerSystem(SmritiSystem);
   world.registerSystem(AmbienceSystem);
   world.registerSystem(PreviewSystem);
+  world.registerSystem(PalmMenuSystem);
   startScreen.ready(world);
 });

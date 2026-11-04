@@ -13,7 +13,8 @@
       "mode": "vr",
       "offer": "always",
       "features": {
-        "handTracking": true
+        "handTracking": true,
+        "hitTest": true
       }
     },
     "input": {
@@ -41,7 +42,7 @@
       "grabbing": true,
       "physics": false,
       "sceneUnderstanding": false,
-      "environmentRaycast": false,
+      "environmentRaycast": true,
       "spatialUI": {
         "kit": "horizon",
         "preferredColorScheme": "dark"

@@ -7,6 +7,9 @@
  */
 import {
   createSystem,
+  EnvironmentRaycastTarget,
+  Group,
+  RaycastSpace,
   type Entity,
   Grabbed,
   type Object3D,
@@ -29,6 +32,7 @@ import { Petals } from './fx.js';
 import { animateKit, styleKit, type Styled } from './kit-style.js';
 import { loadPalace, nextReviewText, recordReview, savePlacement } from './palace-store.js';
 import { preview } from './preview.js';
+import { sessionBus } from './session-bus.js';
 import { settings } from './settings.js';
 import { hush, speak } from './voice.js';
 import { KITS } from './memory-kits.js';
@@ -89,6 +93,11 @@ export class SmritiSystem extends createSystem({
   private morphs: Array<{ forms: Object3D[]; offset: number }> = [];
   private diya!: Object3D;
   private flame: Object3D | undefined;
+  // Smriti's face: eyes that blink and a lamp that turns to look at you.
+  private face: Object3D | undefined;
+  private eyes: Object3D[] = [];
+  private nextBlink = 2.5;
+  private diyaPos = new Vector3();
   private glow!: PointLight;
   private head = new Vector3();
   private tmpA = new Vector3();
@@ -137,6 +146,8 @@ export class SmritiSystem extends createSystem({
   private capFwd = new Vector3();
   private capRight = new Vector3();
   private headQ = new Quaternion();
+  // Own room: hand-ray surface hits, so a memory let go near a real desk or shelf settles onto it.
+  private surfaceProbes: { entity: Entity; ring: Object3D }[] = [];
 
   init(): void {
     this.setupCaption();
@@ -177,13 +188,16 @@ export class SmritiSystem extends createSystem({
     line.name = 'CaptionLine';
     hint.name = 'CaptionHint';
     this.setCaption = (w, l, h) => {
-      who.setProperties({ text: w } as never);
-      line.setProperties({ text: l } as never);
-      hint.setProperties({ text: h, display: h ? 'flex' : 'none' } as never);
+      who.setProperties({ text: captionSafe(w) } as never);
+      line.setProperties({ text: captionSafe(l) } as never);
+      hint.setProperties({ text: captionSafe(h), display: h ? 'flex' : 'none' } as never);
     };
   }
 
   private asked = 0;
+  private lastLine = '';
+  private lastHint = '';
+  private seenRepeat = 0;
 
   /** The caption's top line: who is speaking and where the person is in the session. */
   private stepLabel(): string {
@@ -210,6 +224,8 @@ export class SmritiSystem extends createSystem({
   }
 
   private say(line: string, hint = ''): void {
+    this.lastLine = line;
+    this.lastHint = hint;
     this.setCaption(this.stepLabel(), line, hint);
     this.speakUntil = this.elapsed + Math.min(8, 1.5 + line.length * 0.06);
     // Speak only inside the experience (headset or preview), never over the start screen.
@@ -223,6 +239,8 @@ export class SmritiSystem extends createSystem({
     this.glow.position.set(0, 0.12, 0.07);
     obj.add(this.glow);
     this.flame = obj.getObjectByName('DiyaFlame') ?? undefined;
+    this.face = obj.getObjectByName('Face') ?? undefined;
+    this.eyes = ['EyeL', 'EyeR'].map((n) => obj.getObjectByName(n)).filter((o): o is Object3D => !!o);
     const e = this.world.createTransformEntity(obj);
     e.object3D!.name = 'Smriti';
     e.object3D!.position.set(-0.46, 1.12, -0.95);
@@ -403,6 +421,7 @@ export class SmritiSystem extends createSystem({
     const blend = this.world.renderer.xr.getEnvironmentBlendMode?.();
     this.ownRoom = blend === 'alpha-blend' || blend === 'additive';
     if (this.ownRoom) {
+      this.spawnSurfaceProbes();
       const room = this.world.getSceneObject('palace-room');
       if (room) room.visible = false;
       const motes = this.world.scene.getObjectByName('DustMotes');
@@ -488,11 +507,49 @@ export class SmritiSystem extends createSystem({
     let n = 0;
     while (ownSpots.has(`own${n}`)) n++;
     const id = `own${n}`;
-    const anchor: [number, number, number] = [pos.x, Math.max(0.03, pos.y), pos.z];
+    const surface = this.surfaceNear(pos);
+    const anchor: [number, number, number] = surface ? [surface.x, surface.y + 0.005, surface.z] : [pos.x, Math.max(0.03, pos.y), pos.z];
     const spot = { id: id as Locus['id'], label: this.describeSpot(anchor), anchor };
     ownSpots.set(id, spot);
     this.addOwnMarker(spot);
     return spot;
+  }
+
+  /**
+   * One raycast probe per hand ray (left and right), using the headset's own surface
+   * detection (WebXR hit-test). Where the feature is missing, the probes never hit and
+   * placement stays exactly where the memory is let go.
+   */
+  private spawnSurfaceProbes(): void {
+    for (const space of [RaycastSpace.Left, RaycastSpace.Right]) {
+      const holder = new Group();
+      const ring = makeSpotRing();
+      ring.scale.setScalar(0.45);
+      ring.visible = false;
+      holder.add(ring);
+      const entity = this.world.createTransformEntity(holder);
+      entity.object3D!.name = `Surface probe ${space}`;
+      entity.addComponent(EnvironmentRaycastTarget, { space, maxDistance: 2.5 });
+      this.surfaceProbes.push({ entity, ring });
+    }
+  }
+
+  /** The detected real surface point closest to where a memory was let go, if within 45 cm. */
+  private surfaceNear(pos: Vector3): Vector3 | null {
+    let best: Vector3 | null = null;
+    let bestD = 0.45;
+    for (const p of this.surfaceProbes) {
+      if (!p.entity.getValue(EnvironmentRaycastTarget, 'xrHitTestResult')) continue;
+      const obj = p.entity.object3D;
+      if (!obj || !obj.visible) continue;
+      obj.getWorldPosition(this.fxPos);
+      const d = this.fxPos.distanceTo(pos);
+      if (d < bestD) {
+        bestD = d;
+        best = this.tmpB.copy(this.fxPos);
+      }
+    }
+    return best;
   }
 
   /** "the spot on your left, up high": words for a spot relative to the start pose. */
@@ -634,7 +691,7 @@ export class SmritiSystem extends createSystem({
         this.seenSteps = -1;
         this.say('That is all it takes. I am still imagining your palace.', this.progressHint());
       } else {
-        this.say('That is all it takes.', '');
+        this.say('That is all it takes.', preview.active ? '' : 'Tip: turn your left palm up any time for my menu.');
         this.later(1, () => this.arriveDeck());
       }
     });
@@ -893,8 +950,16 @@ export class SmritiSystem extends createSystem({
     this.elapsed += delta;
     const t = this.elapsed;
     if (preview.active && !this.begun) this.beginPreview();
+    if (sessionBus.repeat !== this.seenRepeat) {
+      this.seenRepeat = sessionBus.repeat;
+      if (this.lastLine) this.say(this.lastLine, this.lastHint);
+    }
     if (this.carried) this.updateCarry();
-    if (this.ownRoom) this.followCaption(delta);
+    if (this.ownRoom) {
+      this.followCaption(delta);
+      const carrying = this.queries.held.entities.size > 0;
+      for (const p of this.surfaceProbes) p.ring.visible = carrying;
+    }
     if (this.nextAction && t >= this.nextAt) {
       const fn = this.nextAction;
       this.nextAction = null;
@@ -992,13 +1057,48 @@ export class SmritiSystem extends createSystem({
     // Smriti the diya: gentle float, flame flicker, brighter while speaking
     if (this.diya) {
       this.diya.position.y = 1.12 + Math.sin(t * 1.3) * 0.02;
-      this.diya.rotation.y = Math.sin(t * 0.4) * 0.3 + 0.6;
+      // Turn to face the person (spout and eyes toward them), with a little sway.
+      this.viewPos(this.tmpB);
+      this.diya.getWorldPosition(this.diyaPos);
+      const want = Math.atan2(this.tmpB.x - this.diyaPos.x, this.tmpB.z - this.diyaPos.z) + Math.sin(t * 0.5) * 0.12;
+      let dy = want - this.diya.rotation.y;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      this.diya.rotation.y += dy * Math.min(1, delta * 3);
       const speaking = t < this.speakUntil;
-      const flick = 0.85 + Math.sin(t * 17) * 0.08 + Math.sin(t * 7.3) * 0.07;
-      if (this.flame) this.flame.scale.set(0.8 * flick, 2 * flick * (speaking ? 1.25 : 1), 0.8 * flick);
+      const flick = 0.9 + Math.sin(t * 17) * 0.05 + Math.sin(t * 7.3) * 0.05;
+      // While speaking the flame bobs a little, like a voice.
+      const talk = speaking ? 1 + Math.abs(Math.sin(t * 11)) * 0.12 : 1;
+      if (this.flame) this.flame.scale.set(flick, flick * talk, flick);
+      if (this.face) {
+        // Eyes ride on the flame's front surface as it flickers and talks.
+        this.face.position.y = 0.052 + 0.044 * flick * talk;
+        this.face.position.z = 0.075 + 0.031 * flick;
+      }
+      // Blink every few seconds (about 0.13 s, eyes squash to a line).
+      if (t > this.nextBlink) this.nextBlink = t + 2.6 + Math.random() * 3;
+      const b = this.nextBlink - t;
+      const open = b < 0.13 ? Math.abs(b - 0.065) / 0.065 : 1;
+      for (const eye of this.eyes) eye.scale.y = 1.35 * Math.max(0.08, open);
       this.glow.intensity = ((speaking ? 0.6 : 0.35) + this.flare * 1.6) * flick;
     }
   }
+}
+
+/**
+ * The in-headset caption font covers plain ASCII only, so accents, curly quotes and
+ * dashes (common in AI text and in Spanish) would show as boxes. Fold them to ASCII
+ * for the caption; speech and the answer labels keep the original spelling.
+ */
+function captionSafe(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u2018\u2019\u02BC]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014\u00B7]/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/[¡¿]/g, '')
+    .replace(/[^\x20-\x7E\n]/g, '');
 }
 
 function shuffle<T>(arr: T[]): void {

@@ -41,7 +41,8 @@ const C = {
   wire: [std('#E0453A', 0.6), std('#2F6BDE', 0.6), std('#F2C230', 0.6), std('#3DBA4E', 0.6)],
   morph: [std('#9B5DE5', 0.35, '#9B5DE5', 0.25), std('#00BBF9', 0.35, '#00BBF9', 0.25), std('#F15BB5', 0.35, '#F15BB5', 0.25)],
   terracotta: std('#B5552E', 0.85),
-  flame: new MeshStandardMaterial({ color: '#FFD27A', emissive: '#FFB02E', emissiveIntensity: 2.5, roughness: 1 }),
+  flame: new MeshStandardMaterial({ color: '#FFC24A', emissive: '#FF9A1F', emissiveIntensity: 1.15, roughness: 1 }),
+  eye: new MeshStandardMaterial({ color: '#2a1406', roughness: 0.25, emissive: '#000000' }),
   marigold: new MeshStandardMaterial({ color: '#E3A21A', emissive: '#E3A21A', emissiveIntensity: 1.2, roughness: 0.6, transparent: true, opacity: 0.85 }),
 };
 
@@ -170,9 +171,24 @@ export function makeDiya(): Group {
   const spout = m(new ConeGeometry(0.02, 0.05, 8), C.terracotta, 'DiyaSpout', 0, 0.035, 0.08);
   spout.rotation.x = Math.PI / 2;
   g.add(spout);
-  const flame = m(new SphereGeometry(0.02, 10, 8), C.flame, 'DiyaFlame', 0, 0.075, 0.075);
-  flame.scale.set(0.8, 2, 0.8);
+  // Smriti herself: a teardrop flame with two eyes, sitting on the spout.
+  const tear = [[0.0005, 0], [0.018, 0.006], [0.03, 0.024], [0.031, 0.04], [0.024, 0.062], [0.012, 0.085], [0.0005, 0.108]]
+    .map(([r, y]) => new Vector2(r, y));
+  const flame = m(new LatheGeometry(tear, 18), C.flame, 'DiyaFlame', 0, 0.052, 0.075);
   g.add(flame);
+  const face = new Group();
+  face.name = 'Face';
+  face.position.set(0, 0.052 + 0.044, 0.075 + 0.031);
+  const eyeGeo = new SphereGeometry(0.0058, 12, 10);
+  const shineGeo = new SphereGeometry(0.0019, 8, 6);
+  for (const side of [-1, 1]) {
+    const eye = m(eyeGeo, C.eye, side < 0 ? 'EyeL' : 'EyeR', side * 0.0115, 0, 0);
+    eye.scale.set(1, 1.35, 0.55);
+    const shine = m(shineGeo, C.white, 'EyeShine', -0.0018, 0.0025, 0.0045);
+    eye.add(shine);
+    face.add(eye);
+  }
+  g.add(face);
   return g;
 }
 

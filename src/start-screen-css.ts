@@ -47,6 +47,8 @@ export const START_CSS = `
 #smriti-start h2{margin:6px 0 -4px;font:600 15px/1.3 var(--sans);color:var(--lime)}
 #smriti-start .decks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 #smriti-start .deck{display:flex;flex-direction:row;align-items:center;gap:10px;text-align:left;padding:10px 12px;border:1px solid var(--teak-edge);background:rgba(30,20,16,.72);color:var(--lime);border-radius:14px}
+#smriti-start .deck[hidden]{display:none}
+#smriti-start .more{align-self:flex-start;margin-top:-8px;border:0;background:none;padding:2px 0;color:var(--brass-hi);font:600 14px/1.4 var(--sans);text-decoration:underline;text-underline-offset:3px;border-radius:4px}
 #smriti-start .deck svg{flex:none;width:26px;height:26px;color:var(--brass)}
 #smriti-start .deck .t{font-weight:600;font-size:14px;line-height:1.3}
 #smriti-start .deck .n{font-size:12px;color:var(--lime-dim)}
