@@ -271,7 +271,7 @@ interface CallSetup {
 }
 const BUILD: CallSetup = { system: SYSTEM, tools: TOOLS };
 
-async function callGemini(key: string, contents: Content[], state: { model: number }, setup: CallSetup = BUILD): Promise<Content> {
+async function callGemini(key: string, contents: Content[], state: { model: number; errors?: string[] }, setup: CallSetup = BUILD): Promise<Content> {
   let lastError: unknown;
   for (; state.model < MODELS.length; state.model++) {
     const attempts = setup.quick ? (state.model === 0 ? 2 : 1) : 2;
@@ -281,6 +281,7 @@ async function callGemini(key: string, contents: Content[], state: { model: numb
         return await callModel(MODELS[state.model], key, contents, setup);
       } catch (err) {
         lastError = err;
+        state.errors?.push(`${MODELS[state.model]}: ${String(err).slice(0, 90)}`);
         const status = (err as { status?: number }).status ?? ((err as Error).name === 'AbortError' ? 504 : 0);
         if (!RETRYABLE.has(status)) throw err;
         if (attempt === 0 && !setup.quick) await sleep(700);
@@ -449,7 +450,7 @@ async function reimagine(key: string, body: Record<string, unknown>): Promise<Re
       ],
     },
   ];
-  const state = { model: 0 };
+  const state = { model: 0, errors: [] as string[] };
   // A good reply takes 1-2 s; an overloaded model hangs. Fail fast, retry, and answer within 13 s.
   const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, timeoutMs: 3500, quick: true, deadline: Date.now() + 13_000 };
   try {
@@ -484,7 +485,7 @@ async function reimagine(key: string, body: Record<string, unknown>): Promise<Re
       contents.push({ role: 'user', parts: [{ functionResponse: { name: call.name, ...(call.id ? { id: call.id } : {}), response: { ok: false, error } } }] });
     }
   } catch (err) {
-    return json({ error: 'Smriti could not reach the model.', detail: String(err).slice(0, 200), trace }, 502);
+    return json({ error: 'Smriti could not reach the model.', detail: String(err).slice(0, 200), attempts: state.errors, trace }, 502);
   }
-  return json({ error: 'Smriti could not reimagine this one.', trace }, 422);
+  return json({ error: 'Smriti could not reimagine this one.', attempts: state.errors, trace }, 422);
 }
