@@ -17,6 +17,7 @@
   "dependencies": {
     "@fontsource/hanken-grotesk": "^5.3.0",
     "@fontsource/tiro-devanagari-sanskrit": "^5.3.0",
+    "@iwer/sem": "^2.8.0",
     "@iwsdk/core": "1.1.0-rc.2",
     "@pmndrs/uikit": "^1.0.74",
     "@pmndrs/uikit-horizon": "^1.0.74",
