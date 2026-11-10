@@ -264,22 +264,26 @@ interface CallSetup {
   system: string;
   tools: unknown[];
   timeoutMs?: number;
-  /** One attempt per model, no pause: for calls a person is waiting on mid-session. */
+  /** For calls a person is waiting on mid-session: short attempts, the fast model twice, no pause. */
   quick?: boolean;
+  /** Give up by this time (ms since epoch), so the reply reaches the client before it stops waiting. */
+  deadline?: number;
 }
 const BUILD: CallSetup = { system: SYSTEM, tools: TOOLS };
 
 async function callGemini(key: string, contents: Content[], state: { model: number }, setup: CallSetup = BUILD): Promise<Content> {
   let lastError: unknown;
   for (; state.model < MODELS.length; state.model++) {
-    for (let attempt = 0; attempt < (setup.quick ? 1 : 2); attempt++) {
+    const attempts = setup.quick ? (state.model === 0 ? 2 : 1) : 2;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (setup.deadline && setup.deadline - Date.now() < 900) throw lastError ?? new Error('Out of time.');
       try {
         return await callModel(MODELS[state.model], key, contents, setup);
       } catch (err) {
         lastError = err;
         const status = (err as { status?: number }).status ?? ((err as Error).name === 'AbortError' ? 504 : 0);
         if (!RETRYABLE.has(status)) throw err;
-        if (attempt === 0) await sleep(700);
+        if (attempt === 0 && !setup.quick) await sleep(700);
       }
     }
   }
@@ -288,7 +292,8 @@ async function callGemini(key: string, contents: Content[], state: { model: numb
 
 async function callModel(model: string, key: string, contents: Content[], setup: CallSetup): Promise<Content> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), setup.timeoutMs ?? 20_000);
+  const budget = setup.deadline ? Math.max(500, setup.deadline - Date.now()) : Infinity;
+  const timer = setTimeout(() => ctrl.abort(), Math.min(setup.timeoutMs ?? 20_000, budget));
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     signal: ctrl.signal,
     method: 'POST',
@@ -445,7 +450,8 @@ async function reimagine(key: string, body: Record<string, unknown>): Promise<Re
     },
   ];
   const state = { model: 0 };
-  const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, timeoutMs: 6000, quick: true };
+  // A good reply takes 1-2 s; an overloaded model hangs. Fail fast, retry, and answer within 13 s.
+  const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, timeoutMs: 3500, quick: true, deadline: Date.now() + 13_000 };
   try {
     for (let turn = 0; turn < 3; turn++) {
       const reply = await callGemini(key, contents, state, setup);
