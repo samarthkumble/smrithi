@@ -10,6 +10,10 @@ import { PanelSystem } from './panel.js';
 import { PreviewSystem } from './preview-system.js';
 import { SmritiSystem } from './smriti-system.js';
 import { mountTopicOverlay } from './topic-overlay.js';
+import { attachEmulator, installEmulator } from './emulator.js';
+
+// Hidden ?emulate demo mode only; a no-op for everyone else.
+await installEmulator();
 
 // The start screen appears at once; the 3D world loads behind it.
 const startScreen = mountTopicOverlay();
@@ -21,4 +25,5 @@ World.create(document.getElementById('scene-container') as HTMLDivElement, proje
   world.registerSystem(PreviewSystem);
   world.registerSystem(PalmMenuSystem);
   startScreen.ready(world);
+  void attachEmulator(world);
 });
