@@ -291,6 +291,58 @@ async function callGemini(key: string, contents: Content[], state: { model: numb
   throw lastError;
 }
 
+/**
+ * For a person waiting mid-session: start the fast model at once and back it up
+ * in parallel every 2.5 s, so one hung request (common when a model is
+ * overloaded) never decides the outcome. The first good reply wins.
+ */
+function hedgedCall(key: string, contents: Content[], setup: CallSetup, errors: string[]): Promise<{ reply: Content; model: string }> {
+  const plan: [string, number][] = [
+    [MODELS[0], 0],
+    [MODELS[1] ?? MODELS[0], 2500],
+    [MODELS[0], 5000],
+    [MODELS[2] ?? MODELS[0], 7500],
+  ];
+  const deadline = setup.deadline ?? Date.now() + 12_000;
+  return new Promise((resolve, reject) => {
+    let pending = 0;
+    let launched = 0;
+    let done = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const maybeFail = () => {
+      if (!done && pending === 0 && launched === plan.length) {
+        done = true;
+        reject(new Error(errors.at(-1) ?? 'No model answered in time.'));
+      }
+    };
+    for (const [model, at] of plan) {
+      timers.push(
+        setTimeout(() => {
+          launched++;
+          if (done) return;
+          const left = deadline - Date.now();
+          if (left < 900) return maybeFail();
+          pending++;
+          callModel(model, key, contents, { ...setup, timeoutMs: left }).then(
+            (reply) => {
+              pending--;
+              if (done) return;
+              done = true;
+              timers.forEach(clearTimeout);
+              resolve({ reply, model });
+            },
+            (err) => {
+              pending--;
+              errors.push(`${model}: ${String(err).slice(0, 90)}`);
+              maybeFail();
+            },
+          );
+        }, at),
+      );
+    }
+  });
+}
+
 async function callModel(model: string, key: string, contents: Content[], setup: CallSetup): Promise<Content> {
   const ctrl = new AbortController();
   const budget = setup.deadline ? Math.max(500, setup.deadline - Date.now()) : Infinity;
@@ -452,10 +504,12 @@ async function reimagine(key: string, body: Record<string, unknown>): Promise<Re
   ];
   const state = { model: 0, errors: [] as string[] };
   // A good reply takes 1-2 s; an overloaded model hangs. Fail fast, retry, and answer within 13 s.
-  const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, timeoutMs: 3500, quick: true, deadline: Date.now() + 13_000 };
+  const setup: CallSetup = { system: REIMAGINE_SYSTEM, tools: REIMAGINE_TOOLS, quick: true, deadline: Date.now() + 13_000 };
+  let usedModel = MODELS[0];
   try {
     for (let turn = 0; turn < 3; turn++) {
-      const reply = await callGemini(key, contents, state, setup);
+      const { reply, model } = await hedgedCall(key, contents, setup, state.errors);
+      usedModel = model;
       contents.push(reply);
       const call = reply.parts.find((p) => p.functionCall)?.functionCall;
       if (!call) {
@@ -479,7 +533,7 @@ async function reimagine(key: string, body: Record<string, unknown>): Promise<Re
           modifier: MODIFIERS.includes(String(a.modifier)) ? String(a.modifier) : 'none',
           weird,
           trace,
-          model: MODELS[state.model],
+          model: usedModel,
         });
       }
       contents.push({ role: 'user', parts: [{ functionResponse: { name: call.name, ...(call.id ? { id: call.id } : {}), response: { ok: false, error } } }] });
