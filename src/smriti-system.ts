@@ -26,7 +26,7 @@ import {
 } from '@iwsdk/core';
 import { makeAnswerOrb, ORB_COLORS, type OrbParts } from './answer-orb.js';
 import { chime } from './chime.js';
-import { deckSource, type Reimagined, reimagineCard } from './deck-source.js';
+import { deckSource, type Reimagined, reimagineCard, warmAgent } from './deck-source.js';
 import { OOP_DECK, type Deck, type MemoryCard } from './decks.js';
 import { Petals } from './fx.js';
 import { animateKit, styleKit, type Styled } from './kit-style.js';
@@ -813,6 +813,7 @@ export class SmritiSystem extends createSystem({
   }
 
   private startRecall(): void {
+    warmAgent();
     this.mode = 'recall';
     this.round = 1;
     this.asked = 0;

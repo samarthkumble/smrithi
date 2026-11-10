@@ -147,9 +147,14 @@ export interface Reimagined {
  * one the person picked. Resolves to null (never rejects) if the agent is slow or fails,
  * so the session can carry on with the card's own weird line.
  */
+/** Wakes the agent's server function when a test starts, so a redraw after a miss is quick. */
+export function warmAgent(): void {
+  fetch(agentUrl(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"mode":"warm"}' }).catch(() => undefined);
+}
+
 export async function reimagineCard(card: MemoryCard, confused: MemoryCard | undefined, confusedAnswer: string): Promise<Reimagined | null> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {
     const res = await fetch(agentUrl(), {
       method: 'POST',

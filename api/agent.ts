@@ -324,6 +324,8 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return json({ error: 'Send JSON like {"topic": "..."}' }, 400);
   }
+  // Sent when a test starts, so the first redraw does not wait for a cold start.
+  if (body.mode === 'warm') return json({ ok: true });
   if (body.mode === 'reimagine') {
     if (limited(ip, 'reimagine', 40)) return json({ error: 'Too many requests. Try again in a few minutes.' }, 429);
     return reimagine(key, body);
