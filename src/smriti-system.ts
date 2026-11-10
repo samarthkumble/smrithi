@@ -408,6 +408,10 @@ export class SmritiSystem extends createSystem({
     } else if (card && !this.ownRoom && f.locus !== card.suggested) {
       // Placed somewhere other than Smriti's suggestion: the story names the wrong spot, so name the real one.
       this.say(`${card.answer} lives at ${spot?.label ?? 'this spot'} now.`, `${total - count} left to place.`);
+    } else if (card && this.ownRoom) {
+      // Deck stories name the Mangalore room (the jhoola, the window); in your own room keep only the parts that fit anywhere.
+      const rest = this.roomFree(card.story);
+      this.say(`${card.answer} lives at ${spot?.label ?? 'this spot'} now.${rest ? ` ${rest}` : ''}`, `${total - count} left to place.`);
     } else if (card) {
       this.say(card.story.replace(/^On [^,]+, |^Under [^,]+, /, `At ${spot?.label ?? 'this spot'}, `), `${total - count} left to place.`);
     }
@@ -553,6 +557,15 @@ export class SmritiSystem extends createSystem({
   }
 
   /** "the spot on your left, up high": words for a spot relative to the start pose. */
+  /** Sentences that do not mention a spot in the Mangalore room. */
+  private roomFree(text: string): string {
+    const room = /\b(jhoola|swing|door(way)?|book ?shel(f|ves)|shelf|window|clock|lamp|diya|tulsi|rangoli|stool)\b/i;
+    return text
+      .split(/(?<=[.!?])\s+/)
+      .filter((part) => part && !room.test(part))
+      .join(' ');
+  }
+
   private describeSpot([x, y, z]: [number, number, number]): string {
     const ang = (Math.atan2(x, -z) * 180) / Math.PI;
     const side = Math.abs(ang) < 35 ? 'in front of you' : Math.abs(ang) > 135 ? 'behind you' : ang < 0 ? 'on your left' : 'on your right';
@@ -911,7 +924,7 @@ export class SmritiSystem extends createSystem({
       void reimagineCard(card, confusedCard, orb.value).then((res) => {
         if (this.mode !== 'recall' || this.round !== round) return;
         if (res) this.applyReimagined(e, card, res);
-        this.say(card.weird, res ? `Smriti redrew it because you picked ${orb.value}.` : `You picked ${orb.value}. It was ${card.answer}.`);
+        this.say(this.ownRoom ? this.roomFree(card.weird) || `Picture ${card.answer} there, bigger and stranger.` : card.weird, res ? `Smriti redrew it because you picked ${orb.value}.` : `You picked ${orb.value}. It was ${card.answer}.`);
         this.later(5, () => this.askNext());
       });
     }
